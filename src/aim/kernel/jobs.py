@@ -4,15 +4,23 @@
                            |
                            +--metric computation failed-------------> error
                            +--bad jobConfiguration / owner vanished--> error_management
+
+A job evaluates ONE tenant (`cid`) over a window of complete days. For each
+(article, account, day) the forecast that counts is the one from the most recent
+`ai-results` row written BEFORE that day began (rule (a), see README).
 """
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from enum import StrEnum
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 JOB_TYPE = "metrics"
 """`data-jobs.type` this service claims; `abc_xyz` rows belong to someone else."""
+
+DEFAULT_WINDOW_DAYS = 30
 
 
 class JobState(StrEnum):
@@ -33,24 +41,63 @@ class MetricJob:
     """`data-jobs.jobConfiguration` as stored -- parsed by `parse_config`."""
 
 
+@dataclass(frozen=True)
+class Window:
+    """Inclusive range of complete days."""
+
+    start: date
+    end: date
+
+    @property
+    def days(self) -> int:
+        return (self.end - self.start).days + 1
+
+
 class MetricJobConfig(BaseModel):
-    """Shape of `jobConfiguration` for a metrics job. ASSUMED, not yet agreed with the
-    backend: `{"aiJobId": 123}`."""
+    """`jobConfiguration` of a metrics job. Every field is optional; an empty
+    jobConfiguration means all defaults: the last 30 complete days, ending yesterday.
+
+        {}                                            last 30 days
+        {"windowDays": 90}                            last 90 days
+        {"start": "2026-09-01", "end": "2026-09-30"}  fixed window
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
-    ai_job_id: int = Field(alias="aiJobId", gt=0)
-    """The forecast run (`ai-jobs.id`) whose predictions are evaluated."""
+    window_days: int = Field(default=DEFAULT_WINDOW_DAYS, alias="windowDays", ge=1, le=366)
+    start: date | None = None
+    end: date | None = None
+
+    @model_validator(mode="after")
+    def _one_way_to_say_the_window(self) -> Self:
+        if (self.start is None) != (self.end is None):
+            raise ValueError("start and end go together")
+        if self.start is not None:
+            if "window_days" in self.model_fields_set:
+                raise ValueError("give either windowDays or start/end, not both")
+            if self.start > self.end:
+                raise ValueError("start is after end")
+        return self
+
+    def window(self, today: date) -> Window:
+        """The days to evaluate. Never includes `today`: its sales are still arriving."""
+        if self.start is not None:
+            if self.end >= today:
+                raise ConfigError(f"end {self.end} is not a complete day yet (today {today})")
+            return Window(self.start, self.end)
+        end = today - timedelta(days=1)
+        return Window(end - timedelta(days=self.window_days - 1), end)
 
 
 class ConfigError(Exception):
-    """`jobConfiguration` is missing or does not match `MetricJobConfig`."""
+    """`jobConfiguration` does not match `MetricJobConfig`."""
 
 
 def parse_config(job: MetricJob) -> MetricJobConfig:
-    if not job.configuration:
-        raise ConfigError(f"data-job {job.id}: jobConfiguration is empty")
+    raw = (job.configuration or "").strip()
+    if not raw:
+        return MetricJobConfig()
     try:
-        return MetricJobConfig.model_validate_json(job.configuration, strict=True)
+        return MetricJobConfig.model_validate_json(raw, strict=True)
     except ValidationError as exc:
         raise ConfigError(f"data-job {job.id}: invalid jobConfiguration: {exc}") from exc
