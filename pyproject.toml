@@ -1,0 +1,63 @@
+[project]
+name = "aim"
+version = "0.1.0"
+description = "Circly AI-Metrics: computes accuracy metrics for AI-Pipeline forecast runs"
+readme = "README.md"
+authors = [
+    { name = "olivercircly", email = "oliver@circly.at" }
+]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "numpy>=2.3",
+    "polars>=1.30",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.10",
+    "pymysql>=1.1",
+    "sqlalchemy>=2.0",
+]
+
+[project.scripts]
+aim = "aim.apps.cli:main"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.0",
+    "pytest>=8.4",
+    "ruff>=0.12",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.12,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: needs a running MariaDB (select with -m integration)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.importlinter]
+root_package = "aim"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: apps > service > (boundaries | metrics) > kernel"
+type = "layers"
+layers = [
+    "aim.apps",
+    "aim.service",
+    "aim.boundaries | aim.metrics",
+    "aim.kernel",
+]
+
+[[tool.importlinter.contracts]]
+name = "service and metrics never import a DB driver"
+type = "forbidden"
+source_modules = ["aim.service", "aim.metrics", "aim.kernel"]
+forbidden_modules = ["sqlalchemy", "pymysql"]
