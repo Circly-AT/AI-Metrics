@@ -1,9 +1,10 @@
 from dataclasses import dataclass, replace
+from datetime import date
 
 import polars as pl
 import pytest
 
-from aim.kernel.jobs import JobState, MetricJob
+from aim.kernel.jobs import JobState, MetricJob, Window
 from aim.kernel.ports import EVAL_SCHEMA
 from aim.service.poller import Backoff, Poller, PollerConfig
 
@@ -90,8 +91,8 @@ class FakeWriter:
     def __init__(self) -> None:
         self.written: dict[int, tuple] = {}
 
-    def write(self, job, config, rows):
-        self.written[job.id] = (config, list(rows))
+    def write(self, job, window, rows):
+        self.written[job.id] = (window, list(rows))
 
 
 def _poller(store, reader, writer=None):
@@ -101,19 +102,21 @@ def _poller(store, reader, writer=None):
         writer=writer or FakeWriter(),
         config=PollerConfig(owner="me", poll_interval=0, backoff_initial=0, backoff_max=0),
         is_instance_fault=lambda exc: isinstance(exc, InstanceFault),
+        today=lambda: date(2026, 10, 15),
     )
 
 
-JOB = MetricJob(id=1, cid="c1", configuration='{"aiJobId": 42}')
+JOB = MetricJob(id=1, cid="c1", configuration=None)  # what the backend writes today
+LAST_30 = Window(date(2026, 9, 15), date(2026, 10, 14))
 
 
 def test_a_triggered_job_is_claimed_computed_and_finished():
     store, reader, writer = FakeJobStore(JOB), FakeReader(_frame(3)), FakeWriter()
     assert _poller(store, reader, writer).tick() is True
     assert store.rows[1].state is JobState.finished
-    assert reader.calls == [{"cid": "c1", "ai_job_id": 42}]
-    config, rows = writer.written[1]
-    assert config.ai_job_id == 42
+    assert reader.calls == [{"cid": "c1", "window": LAST_30}]
+    window, rows = writer.written[1]
+    assert window == LAST_30
     assert {r.metric for r in rows} == {"wape", "mae", "rmse", "bias"}
 
 
@@ -133,13 +136,13 @@ def test_a_job_lost_to_a_sister_instance_moves_on_to_the_next():
 
 @pytest.mark.parametrize(
     "configuration",
-    [None, "", "not json", '{"aiJobId": "42"}', '{"aiJobId": 0}', '{"aiJobId": 42, "x": 1}'],
+    ["not json", '{"windowDays": "30"}', '{"start": "2026-10-01", "end": "2026-10-15"}'],
 )
 def test_an_unusable_config_ends_the_job_as_error_management_without_reading(configuration):
     store, reader = FakeJobStore(replace(JOB, configuration=configuration)), FakeReader(_frame(1))
     assert _poller(store, reader).tick() is True
     assert store.rows[1].state is JobState.error_management
-    assert "jobConfiguration" in store.rows[1].error
+    assert store.rows[1].error  # the reason reaches data-jobs.error
     assert reader.calls == []
 
 
