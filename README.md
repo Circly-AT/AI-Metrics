@@ -2,35 +2,17 @@
 
 Computes forecast accuracy metrics per tenant. A management service polls
 `circly_data_handling.data-jobs` for `type = 'metrics'` rows, claims one, compares the
-tenant's point forecasts (`prediction_values`) over a window of past days with actual
-sales and writes the metrics to `ai-metric-results`. `abc_xyz` rows are not touched.
+tenant's point forecasts over a window of past days (default: the last 30) with actual
+sales and writes the metrics to `ai-metric-results`.
 
-### Which forecast counts for a day
-
-Daily runs forecast the same day several times. For each (article, account, day) the
-forecast that counts is the one from the **latest `ai-results` row written before that day
-began** (`created_at < day 00:00`, ties to the higher id). A forecast written on the day
-itself is ignored. The selection runs in SQL (`boundaries/db/forecast_reader.py`).
-
-### `jobConfiguration`
-
-Optional. Empty (what the backend writes today) means the defaults:
-
-```json
-{}                                            // last 30 complete days, ending yesterday
-{"windowDays": 90}                            // last 90 days, ending yesterday
-{"start": "2026-09-01", "end": "2026-09-30"}  // fixed window, both inclusive
-```
-
-Today is never evaluated (its sales are still arriving). Parsed strictly: an unknown key,
-`"30"` instead of `30`, `start` without `end`, `windowDays` together with `start`/`end`, or
-an `end` of today or later ends the job as `error_management` before any data is read.
+**Documentation: [`docs/`](docs/README.md)** — contracts (what is agreed with the pipeline
+and the backend, and what is only assumed) and architectural decisions (ADRs).
 
 ## Run
 
 ```bash
 uv sync
-cp .env.example .env   # fill in DB_*
+cp .env.example .env   # fill in DB_*, incl. DB_TLS + certificate paths (ADR 0006)
 uv run aim serve --env-file .env          # poll until SIGTERM/SIGINT
 uv run aim serve --env-file .env --once   # one poll, then exit
 ```
@@ -39,14 +21,11 @@ uv run aim serve --env-file .env --once   # one poll, then exit
 
 ```bash
 uv run pytest          # unit tests (no DB needed)
-uv run lint-imports    # layer contract
+uv run lint-imports    # layer contract (ADR 0001)
 uv run ruff check
 ```
 
 ## Layout
-
-Layers, enforced by import-linter (`pyproject.toml`). Simplified from AI-Pipeline-V3's
-`apps → coordination → execution → boundaries | engine → kernel`:
 
 ```
 src/aim/
@@ -55,53 +34,33 @@ src/aim/
                runner.py         one job: parse config → window → load → evaluate → write
   boundaries/  settings.py       env reader (same DB_* names as the pipeline)
                db/job_store.py   data-jobs (type=metrics): conditional-UPDATE claim, sweep
-               db/forecast_reader.py   latest forecast before each day + sales → forecast vs. actual
+               db/forecast_reader.py   forecast-selection strategies + sales → forecast vs. actual
                db/metric_writer.py     ai-metric-results
-  metrics/     point.py          wape, mae, rmse, bias (same formulas as the pipeline)
+  metrics/     point.py          wape, mae, rmse, bias
                evaluate.py       per (article, account) + pooled total
-  kernel/      jobs.py (states, jobConfiguration + window), results.py, ports.py (Protocols)
-ddl/           proposed ai-metric-results table (not yet agreed with the backend)
+  kernel/      jobs.py (states, jobConfiguration, window, ForecastSelection),
+               results.py, ports.py (Protocols)
+ddl/           proposed ai-metric-results table
+docs/          contracts/ and decisions/
 ```
 
-`service`, `metrics` and `kernel` never import a DB driver, so the poller is tested
-against in-memory fakes (`tests/unit/test_poller.py`).
-
-## Job lifecycle
-
-```
-trigger ──claim──▶ job_detected ──▶ finished
-                        ├─────────▶ error             (metric computation failed)
-                        ├─────────▶ error_management  (bad jobConfiguration)
-                        └──stale──▶ error_management  (owner stopped responding)
-```
-
-The message goes to `data-jobs.error`, the owner (`host:pid`) to `containerID`.
-
-- **Claim** is `UPDATE … WHERE id = :id AND type = 'metrics' AND state = 'trigger'`;
-  `rowcount == 1` means this instance owns it. Several instances can run side by side.
-- **Job fault** (no forecast in the window, bad data, a bug in a metric): `error`, the loop
-  goes on.
-- **Instance fault** (DB unreachable): the claim stays, the loop backs off exponentially
-  (5 s → 300 s). After `STALE_GRACE_SECONDS` without a row change the sweep ends the claim
-  as `error_management`. `data-jobs` has no attempts counter, so there is no automatic
-  retry; re-triggering = set `state` back to `trigger`.
+| Topic | Where |
+|---|---|
+| Job states, `jobConfiguration` keys and defaults | [contracts/data-jobs.md](docs/contracts/data-jobs.md) |
+| Which formulas match the pipeline, which do not | [contracts/metric-formulas.md](docs/contracts/metric-formulas.md) |
+| Which forecast counts for a day, how to add a strategy | [ADR 0004](docs/decisions/0004-forecast-selection-is-a-named-strategy.md) |
+| Result table shape | [contracts/ai-metric-results.md](docs/contracts/ai-metric-results.md) |
 
 ## Open questions
 
-1. **Forecast selection rule is untested against a DB**: it lives in SQL, and the unit tests
-   use fakes. Needs an integration test on a seeded MariaDB (several overlapping runs, a
-   forecast written on the target day itself, a tie on `created_at`).
-2. **`error` vs. `error_management`**: the split above is my reading; confirm it matches
-   what the backend/frontend expects.
-3. **Results table**: `ddl/ai-metric-results.sql` is a proposal, the backend has to agree to
-   it (and to grants: SELECT/UPDATE on `data-jobs`, SELECT on `prediction_values`,
-   `ai-results`, `ai-jobs`, `sales`, DELETE/INSERT on the results table).
-4. **Day boundaries and filters**: days are UTC days, both for `prediction_values.date`,
-   `sales.orderDate` and the "written before the day" cut-off. The pipeline converts to the
-   tenant's time zone and filters returns/special sales per config, so numbers can drift
-   from its backtests until that is aligned.
-5. **Granularity**: forecasts are assumed to be daily. Weekly/monthly forecasts need the
-   actuals bucketed the same way.
+1. **Forecast selection is untested against a DB**: the strategy queries run in SQL; the
+   unit tests use fakes. Needs an integration test on a seeded MariaDB (ADR 0004).
+2. **`error` vs. `error_management`**: our reading, to confirm with the backend
+   ([data-jobs](docs/contracts/data-jobs.md#states)).
+3. **Results table and grants**: a proposal ([ai-metric-results](docs/contracts/ai-metric-results.md)).
+4. **Day boundaries and filters**: UTC days, no return/special-sale filters yet — numbers can
+   drift from the pipeline's backtests ([reads](docs/contracts/forecast-and-sales-reads.md#known-differences-from-the-pipeline)).
+5. **Granularity**: forecasts are assumed to be daily.
 6. **More metrics**: MASE needs the training series; quantile forecasts (pinball loss,
    coverage) need `quantile IS NOT NULL` rows.
-7. **Long jobs**: there is no heartbeat, so `STALE_GRACE_SECONDS` must exceed the slowest job.
+7. **Long jobs**: no heartbeat, so `STALE_GRACE_SECONDS` must exceed the slowest job (ADR 0002).

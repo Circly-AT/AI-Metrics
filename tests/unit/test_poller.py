@@ -4,7 +4,7 @@ from datetime import date
 import polars as pl
 import pytest
 
-from aim.kernel.jobs import JobState, MetricJob, Window
+from aim.kernel.jobs import ForecastSelection, JobState, MetricJob, Window
 from aim.kernel.ports import EVAL_SCHEMA
 from aim.service.poller import Backoff, Poller, PollerConfig
 
@@ -91,8 +91,8 @@ class FakeWriter:
     def __init__(self) -> None:
         self.written: dict[int, tuple] = {}
 
-    def write(self, job, window, rows):
-        self.written[job.id] = (window, list(rows))
+    def write(self, job, window, selection, rows):
+        self.written[job.id] = (window, selection, list(rows))
 
 
 def _poller(store, reader, writer=None):
@@ -114,9 +114,10 @@ def test_a_triggered_job_is_claimed_computed_and_finished():
     store, reader, writer = FakeJobStore(JOB), FakeReader(_frame(3)), FakeWriter()
     assert _poller(store, reader, writer).tick() is True
     assert store.rows[1].state is JobState.finished
-    assert reader.calls == [{"cid": "c1", "window": LAST_30}]
-    window, rows = writer.written[1]
-    assert window == LAST_30
+    latest = ForecastSelection.latest_before_day
+    assert reader.calls == [{"cid": "c1", "window": LAST_30, "selection": latest}]
+    window, selection, rows = writer.written[1]
+    assert (window, selection) == (LAST_30, latest)
     assert {r.metric for r in rows} == {"wape", "mae", "rmse", "bias"}
 
 
@@ -183,3 +184,24 @@ def test_backoff_doubles_up_to_the_maximum_and_resets():
     assert [backoff.escalate() for _ in range(4)] == [5, 10, 12, 12]
     backoff.reset()
     assert backoff.escalate() == 5
+
+
+class PermanentFault(Exception):
+    pass
+
+
+def test_a_permanent_fault_ends_the_job_as_error_management_and_stops_the_loop():
+    store = FakeJobStore(JOB)
+    poller = Poller(
+        jobs=store,
+        reader=FakeReader(PermanentFault("UPDATE command denied")),
+        writer=FakeWriter(),
+        config=PollerConfig(owner="me", poll_interval=0, backoff_initial=0, backoff_max=0),
+        is_instance_fault=lambda exc: False,
+        is_permanent_fault=lambda exc: isinstance(exc, PermanentFault),
+        today=lambda: date(2026, 10, 15),
+    )
+    with pytest.raises(PermanentFault):
+        poller.serve(max_ticks=3)
+    assert store.rows[1].state is JobState.error_management
+    assert "DB configuration error" in store.rows[1].error

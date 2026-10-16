@@ -2,13 +2,18 @@ from datetime import date
 
 import pytest
 
-from aim.kernel.jobs import ConfigError, MetricJob, Window, parse_config
+from aim.boundaries.db.forecast_reader import SELECTIONS
+from aim.kernel.jobs import ConfigError, ForecastSelection, MetricJob, Window, parse_config
 
 TODAY = date(2026, 10, 15)
 
 
+def _parse(configuration: str | None):
+    return parse_config(MetricJob(id=1, cid="c1", configuration=configuration))
+
+
 def _window(configuration: str | None) -> Window:
-    return parse_config(MetricJob(id=1, cid="c1", configuration=configuration)).window(TODAY)
+    return _parse(configuration).window(TODAY)
 
 
 @pytest.mark.parametrize("configuration", [None, "", "  ", "{}"])
@@ -42,8 +47,22 @@ def test_an_explicit_window_may_not_reach_into_today():
         '{"start": "2026-09-01"}',
         '{"start": "2026-09-30", "end": "2026-09-01"}',
         '{"windowDays": 30, "start": "2026-09-01", "end": "2026-09-30"}',
+        '{"forecastSelection": "latest"}',
     ],
 )
 def test_an_unusable_config_is_a_config_error(configuration):
     with pytest.raises(ConfigError, match="invalid jobConfiguration"):
         _window(configuration)
+
+
+def test_the_default_forecast_selection_is_latest_before_day():
+    assert _parse(None).forecast_selection is ForecastSelection.latest_before_day
+    assert _parse('{"forecastSelection": "latest_before_day"}').forecast_selection is (
+        ForecastSelection.latest_before_day
+    )
+
+
+def test_every_forecast_selection_has_exactly_one_query():
+    """A strategy accepted in jobConfiguration but missing in the reader would pass the
+    config check and then crash with KeyError mid-job."""
+    assert set(SELECTIONS) == set(ForecastSelection)

@@ -7,10 +7,15 @@ Fault classes, as in AI-Pipeline-V3's `job_poller`:
 - INSTANCE fault (DB down, connection lost -- decided by the injected `is_instance_fault`):
   the claim is left as it is (the stale sweep ends it after the grace period) and the
   loop backs off exponentially.
+- PERMANENT fault (missing grant/table, wrong credentials -- `is_permanent_fault`): not
+  the job's fault and not fixed by waiting. The job ends as `error_management` (if that
+  write still works) and the error escapes, so the process stops. The startup grant
+  preflight normally catches these before the first claim.
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -60,6 +65,7 @@ class Poller:
         writer: MetricWriter,
         config: PollerConfig,
         is_instance_fault: Callable[[BaseException], bool],
+        is_permanent_fault: Callable[[BaseException], bool] = lambda exc: False,
         stop: threading.Event | None = None,
         today: Callable[[], date] = lambda: datetime.now(UTC).date(),
     ) -> None:
@@ -68,6 +74,7 @@ class Poller:
         self._writer = writer
         self._config = config
         self._is_instance_fault = is_instance_fault
+        self._is_permanent_fault = is_permanent_fault
         self.stop = stop or threading.Event()
         self._today = today
         self._backoff = Backoff(config.backoff_initial, config.backoff_max)
@@ -92,6 +99,15 @@ class Poller:
                 self._jobs.fail(job.id, owner=owner, state="error_management", message=str(exc))
             except Exception as exc:
                 if self._is_instance_fault(exc):
+                    raise
+                if self._is_permanent_fault(exc):
+                    message = f"stopped on a DB configuration error: {type(exc).__name__}: {exc}"
+                    # The fail write itself may be what is denied; the original error is
+                    # the one to surface.
+                    with contextlib.suppress(Exception):
+                        self._jobs.fail(
+                            job.id, owner=owner, state="error_management", message=message
+                        )
                     raise
                 _LOGGER.exception("data-job %d failed", job.id)
                 self._jobs.fail(

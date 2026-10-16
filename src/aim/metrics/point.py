@@ -1,5 +1,5 @@
 """Point-forecast metrics. Every function takes (actual, forecast) as equal-length float
-arrays and returns None when the metric is undefined for that input. Formulas match
+arrays and returns None when the metric is undefined for that input. Shared formulas match
 AI-Pipeline-V3 (`aip.engine.evaluation.metrics`) so backtest and live numbers compare."""
 
 import numpy as np
