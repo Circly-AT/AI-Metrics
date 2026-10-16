@@ -1,6 +1,6 @@
 # 0004 — The forecast that counts for a day is a named strategy
 
-**Status:** accepted · 2026-10-15
+**Status:** accepted · 2026-10-15 · the cut-off is local midnight since [ADR 0008](0008-days-are-the-tenants-local-calendar-days.md)
 
 ## Context
 

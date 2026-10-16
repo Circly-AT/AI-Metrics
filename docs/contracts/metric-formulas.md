@@ -39,8 +39,8 @@ Pooled WAPE over many targets, `sum of all |a - f| / sum of all |a|`, is also sh
 
 The formulas match; the inputs do not have to. The pipeline evaluates **backtests** (a
 hold-out split with its own lead time). AIM evaluates **live forecasts** chosen per day by a
-strategy ([ADR 0004](../decisions/0004-forecast-selection-is-a-named-strategy.md)), with UTC
-days and without the pipeline's return/special-sale filters
+strategy ([ADR 0004](../decisions/0004-forecast-selection-is-a-named-strategy.md)), without the
+pipeline's return/special-sale filters
 ([reads contract](forecast-and-sales-reads.md)). Equal formulas make the numbers
 *comparable*; they are not expected to be *equal*.
 

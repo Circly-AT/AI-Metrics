@@ -35,6 +35,7 @@ src/aim/
   boundaries/  settings.py       env reader (same DB_* names as the pipeline)
                db/job_store.py   data-jobs (type=metrics): conditional-UPDATE claim, sweep
                db/forecast_reader.py   forecast-selection strategies + sales → forecast vs. actual
+               db/local_calendar_day.py  UTC instant ↔ tenant's local day (polars, as the pipeline)
                db/metric_writer.py     ai-metric-results
   metrics/     point.py          wape, mae, rmse, bias
                evaluate.py       per (article, account) + pooled total
@@ -58,7 +59,8 @@ docs/          contracts/ and decisions/
 2. **`error` vs. `error_management`**: our reading, to confirm with the backend
    ([data-jobs](docs/contracts/data-jobs.md#states)).
 3. **Results table and grants**: a proposal ([ai-metric-results](docs/contracts/ai-metric-results.md)).
-4. **Day boundaries and filters**: UTC days, no return/special-sale filters yet — numbers can
+4. **Filters**: days are the tenant's local days as in the pipeline (ADR 0008), but no
+   return/special-sale filters yet — numbers can
    drift from the pipeline's backtests ([reads](docs/contracts/forecast-and-sales-reads.md#known-differences-from-the-pipeline)).
 5. **Granularity**: forecasts are assumed to be daily.
 6. **More metrics**: MASE needs the training series; quantile forecasts (pinball loss,

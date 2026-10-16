@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
         engine = create_db_engine(settings.db_url, tls_args=settings.db_tls_args)
         report = check_grants(engine)
         if not report.ok:
-            _LOGGER.error(report.describe(user=settings.db_username, schema=settings.data_db))
+            _LOGGER.error(report.describe(schema=settings.data_db))
             return 1
         poller = build_poller(settings, engine, stop)
         _LOGGER.info("aim serve started (grant preflight passed)")
