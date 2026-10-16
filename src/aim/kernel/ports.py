@@ -2,6 +2,7 @@
 in-memory fakes in the tests."""
 
 from collections.abc import Sequence
+from datetime import date, datetime
 from typing import Literal, Protocol
 
 import polars as pl
@@ -22,6 +23,11 @@ forecast that counts for that day), actual joined (0.0 when there was no sale th
 FailState = Literal["error", "error_management"]
 
 
+class TenantTimezoneError(Exception):
+    """The tenant has no live `companies` row, or no usable time zone. A broken master
+    record: the job fails (`error`) with this message, it never falls back to UTC."""
+
+
 class JobStore(Protocol):
     def list_claimable(self, *, limit: int) -> Sequence[MetricJob]: ...
 
@@ -40,6 +46,13 @@ class JobStore(Protocol):
 
 
 class ForecastReader(Protocol):
+    """Days are the tenant's LOCAL calendar days (ADR 0008); the time zone stays behind
+    this port. Both methods raise `TenantTimezoneError` for a broken tenant record."""
+
+    def local_today(self, *, cid: str, now: datetime) -> date:
+        """The tenant's calendar day at the aware instant `now`."""
+        ...
+
     def load(
         self, *, cid: str, window: Window, selection: ForecastSelection
     ) -> pl.DataFrame:

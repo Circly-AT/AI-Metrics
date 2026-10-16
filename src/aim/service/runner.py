@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import datetime
 
 from aim.kernel.jobs import MetricJob, parse_config
 from aim.kernel.ports import ForecastReader, MetricWriter
@@ -13,12 +13,14 @@ class NoForecastError(Exception):
 
 
 def run_job(
-    job: MetricJob, *, reader: ForecastReader, writer: MetricWriter, today: date
+    job: MetricJob, *, reader: ForecastReader, writer: MetricWriter, now: datetime
 ) -> int:
     """Parse config -> load -> evaluate -> write. Returns the number of metric rows written.
-    Raises `ConfigError` before touching the DB when jobConfiguration is unusable."""
+    Raises `ConfigError` when jobConfiguration is unusable: before any DB read for its
+    shape, after the tenant's "today" for a fixed window reaching into it. "Today" is the
+    tenant's local day at `now` (ADR 0008)."""
     config = parse_config(job)
-    window = config.window(today)
+    window = config.window(reader.local_today(cid=job.cid, now=now))
     selection = config.forecast_selection
     frame = reader.load(cid=job.cid, window=window, selection=selection)
     if frame.is_empty():

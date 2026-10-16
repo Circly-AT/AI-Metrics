@@ -20,7 +20,7 @@ import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from aim.kernel.jobs import ConfigError
 from aim.kernel.ports import ForecastReader, JobStore, MetricWriter
@@ -67,7 +67,7 @@ class Poller:
         is_instance_fault: Callable[[BaseException], bool],
         is_permanent_fault: Callable[[BaseException], bool] = lambda exc: False,
         stop: threading.Event | None = None,
-        today: Callable[[], date] = lambda: datetime.now(UTC).date(),
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._jobs = jobs
         self._reader = reader
@@ -76,7 +76,7 @@ class Poller:
         self._is_instance_fault = is_instance_fault
         self._is_permanent_fault = is_permanent_fault
         self.stop = stop or threading.Event()
-        self._today = today
+        self._now = now
         self._backoff = Backoff(config.backoff_initial, config.backoff_max)
 
     def tick(self) -> bool:
@@ -93,7 +93,7 @@ class Poller:
                 continue
             _LOGGER.info("claimed data-job %d (cid %s)", job.id, job.cid)
             try:
-                run_job(job, reader=self._reader, writer=self._writer, today=self._today())
+                run_job(job, reader=self._reader, writer=self._writer, now=self._now())
             except ConfigError as exc:
                 _LOGGER.error("data-job %d: %s", job.id, exc)
                 self._jobs.fail(job.id, owner=owner, state="error_management", message=str(exc))

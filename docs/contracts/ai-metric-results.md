@@ -13,7 +13,7 @@ Long format, one row per (data-job, level, article, account, metric):
 |---|---|
 | `dataJobId` | the `data-jobs` row that produced the row |
 | `cid` | tenant |
-| `windowStart`, `windowEnd` | evaluated days, both inclusive (UTC) |
+| `windowStart`, `windowEnd` | evaluated days, both inclusive (the tenant's local days) |
 | `forecastSelection` | strategy that chose the forecast per day, e.g. `latest_before_day` |
 | `level` | `article` = one (article, account) · `total` = pooled over every point of the job |
 | `articleId`, `accountId` | set on `article`, `NULL` on `total` |

@@ -1,6 +1,6 @@
 # 0003 — A job is a tenant and a window of complete days
 
-**Status:** accepted · 2026-10-15
+**Status:** accepted · 2026-10-15 · "Days are UTC" superseded by [ADR 0008](0008-days-are-the-tenants-local-calendar-days.md)
 
 ## Context
 

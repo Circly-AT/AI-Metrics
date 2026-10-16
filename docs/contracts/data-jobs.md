@@ -28,7 +28,7 @@ Rows with `type = 'metrics'` and `deleted_at IS NULL`. AIM never reads or writes
 
 ```
 trigger ──claim──▶ job_detected ──▶ finished
-                        ├─────────▶ error             metric computation failed
+                        ├─────────▶ error             metric computation failed, or no usable tenant time zone
                         ├─────────▶ error_management  jobConfiguration unusable
                         └──stale──▶ error_management  owner stopped responding
 ```
@@ -50,8 +50,8 @@ unknown key or a wrong type ends the job as `error_management` before any data i
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `windowDays` | int, 1–366 | `30` | evaluate the last N complete days, ending yesterday (UTC) |
-| `start`, `end` | `"YYYY-MM-DD"`, both or neither | — | fixed window, both inclusive; `end` must be before today; not together with `windowDays` |
+| `windowDays` | int, 1–366 | `30` | evaluate the last N complete days, ending yesterday (the tenant's local days, [ADR 0008](../decisions/0008-days-are-the-tenants-local-calendar-days.md)) |
+| `start`, `end` | `"YYYY-MM-DD"`, both or neither | — | fixed window, both inclusive; `end` must be before the tenant's today; not together with `windowDays` |
 | `forecastSelection` | string | `"latest_before_day"` | which forecast counts per day ([ADR 0004](../decisions/0004-forecast-selection-is-a-named-strategy.md)); currently the only value |
 
 The backend writes no `jobConfiguration` today, so every job runs on the defaults, which

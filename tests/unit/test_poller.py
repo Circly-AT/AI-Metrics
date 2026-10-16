@@ -1,11 +1,11 @@
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import UTC, date, datetime
 
 import polars as pl
 import pytest
 
 from aim.kernel.jobs import ForecastSelection, JobState, MetricJob, Window
-from aim.kernel.ports import EVAL_SCHEMA
+from aim.kernel.ports import EVAL_SCHEMA, TenantTimezoneError
 from aim.service.poller import Backoff, Poller, PollerConfig
 
 
@@ -75,10 +75,23 @@ def _frame(n: int) -> pl.DataFrame:
     )
 
 
+NOW = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
+
+
 class FakeReader:
-    def __init__(self, result: pl.DataFrame | BaseException) -> None:
+    def __init__(
+        self, result: pl.DataFrame | BaseException, today: date | BaseException = date(2026, 10, 15)
+    ) -> None:
         self.result = result
+        self.today = today
         self.calls: list[dict] = []
+        self.today_calls: list[dict] = []
+
+    def local_today(self, **kwargs):
+        self.today_calls.append(kwargs)
+        if isinstance(self.today, BaseException):
+            raise self.today
+        return self.today
 
     def load(self, **kwargs):
         self.calls.append(kwargs)
@@ -102,7 +115,7 @@ def _poller(store, reader, writer=None):
         writer=writer or FakeWriter(),
         config=PollerConfig(owner="me", poll_interval=0, backoff_initial=0, backoff_max=0),
         is_instance_fault=lambda exc: isinstance(exc, InstanceFault),
-        today=lambda: date(2026, 10, 15),
+        now=lambda: NOW,
     )
 
 
@@ -119,6 +132,25 @@ def test_a_triggered_job_is_claimed_computed_and_finished():
     window, selection, rows = writer.written[1]
     assert (window, selection) == (LAST_30, latest)
     assert {r.metric for r in rows} == {"wape", "mae", "rmse", "bias"}
+
+
+def test_the_window_ends_the_day_before_the_tenants_today():
+    """The tenant's local day, not the UTC one: late on 15 Oct UTC it is already 16 Oct in
+    Vienna, so the window ends on the 15th. Mutation: compute today from `now` in UTC
+    in the runner => red."""
+    store, reader = FakeJobStore(JOB), FakeReader(_frame(3), today=date(2026, 10, 16))
+    assert _poller(store, reader).tick() is True
+    assert reader.today_calls == [{"cid": "c1", "now": NOW}]
+    assert reader.calls[0]["window"] == Window(date(2026, 9, 16), date(2026, 10, 15))
+
+
+def test_a_tenant_without_a_usable_timezone_ends_the_job_as_error():
+    error = TenantTimezoneError("cid 'c1' has an empty timezone name ('')")
+    store, reader = FakeJobStore(JOB), FakeReader(_frame(3), today=error)
+    assert _poller(store, reader).tick() is True
+    assert store.rows[1].state is JobState.error
+    assert "empty timezone name" in store.rows[1].error
+    assert reader.calls == []
 
 
 def test_an_empty_queue_is_not_work():
@@ -199,7 +231,7 @@ def test_a_permanent_fault_ends_the_job_as_error_management_and_stops_the_loop()
         config=PollerConfig(owner="me", poll_interval=0, backoff_initial=0, backoff_max=0),
         is_instance_fault=lambda exc: False,
         is_permanent_fault=lambda exc: isinstance(exc, PermanentFault),
-        today=lambda: date(2026, 10, 15),
+        now=lambda: NOW,
     )
     with pytest.raises(PermanentFault):
         poller.serve(max_ticks=3)

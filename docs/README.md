@@ -29,11 +29,12 @@ Every contract page starts with a **Status** line:
 |---|---|---|
 | [0001](decisions/0001-layered-structure-modelled-on-pipeline-v3.md) | Layered structure modelled on AI-Pipeline-V3, simplified | accepted |
 | [0002](decisions/0002-jobs-from-data-jobs-with-conditional-claim.md) | Jobs come from `data-jobs`, claimed by a conditional UPDATE | accepted |
-| [0003](decisions/0003-a-job-is-a-tenant-and-a-window.md) | A job is a tenant and a window of complete days | accepted |
-| [0004](decisions/0004-forecast-selection-is-a-named-strategy.md) | The forecast that counts for a day is a named strategy | accepted |
+| [0003](decisions/0003-a-job-is-a-tenant-and-a-window.md) | A job is a tenant and a window of complete days | accepted; days superseded by 0008 |
+| [0004](decisions/0004-forecast-selection-is-a-named-strategy.md) | The forecast that counts for a day is a named strategy | accepted; cut-off amended by 0008 |
 | [0005](decisions/0005-results-in-long-format-replaced-per-job.md) | Results in long format, replaced per data-job | accepted |
 | [0006](decisions/0006-db-tls-verified-or-explicitly-off.md) | DB TLS is verified, or explicitly off | accepted |
 | [0007](decisions/0007-grant-preflight-and-permanent-db-errors.md) | Grant preflight at start; permanent DB errors stop the process | accepted |
+| [0008](decisions/0008-days-are-the-tenants-local-calendar-days.md) | Days are the tenant's local calendar days | accepted |
 
 ## Keeping this current
 
