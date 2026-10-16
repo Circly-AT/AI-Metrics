@@ -29,7 +29,12 @@ def run_job(
     rows = evaluate(frame)
     writer.write(job, window, selection, rows)
     _LOGGER.info(
-        "data-job %d (cid %s, %s..%s, %s): %d points, %d metric rows",
-        job.id, job.cid, window.start, window.end, selection, frame.height, len(rows),
+        "data-job %d (cid %s, %s..%s): %d points, %d metric rows",
+        job.id,
+        job.cid,
+        window.start,
+        window.end,
+        frame.height,
+        len(rows),
     )
     return len(rows)
