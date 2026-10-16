@@ -6,16 +6,17 @@ from collections.abc import Sequence
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from aim.kernel.jobs import MetricJob, Window
+from aim.kernel.jobs import ForecastSelection, MetricJob, Window
 from aim.kernel.results import MetricRow
 
 DELETE_FOR_JOB = "DELETE FROM `ai-metric-results` WHERE dataJobId = :data_job_id"
 
 INSERT = """INSERT INTO `ai-metric-results`
-  (dataJobId, cid, windowStart, windowEnd, level, articleId, accountId, metric, value, nPoints)
+  (dataJobId, cid, windowStart, windowEnd, forecastSelection,
+   level, articleId, accountId, metric, value, nPoints)
 VALUES
-  (:data_job_id, :cid, :window_start, :window_end, :level, :article_id, :account_id,
-   :metric, :value, :n_points)"""
+  (:data_job_id, :cid, :window_start, :window_end, :selection,
+   :level, :article_id, :account_id, :metric, :value, :n_points)"""
 
 
 class DbMetricWriter:
@@ -23,7 +24,11 @@ class DbMetricWriter:
         self._engine = engine
 
     def write(
-        self, job: MetricJob, window: Window, rows: Sequence[MetricRow]
+        self,
+        job: MetricJob,
+        window: Window,
+        selection: ForecastSelection,
+        rows: Sequence[MetricRow],
     ) -> None:
         params = [
             {
@@ -31,6 +36,7 @@ class DbMetricWriter:
                 "cid": job.cid,
                 "window_start": window.start,
                 "window_end": window.end,
+                "selection": selection,
                 "level": row.level,
                 "article_id": row.article_id,
                 "account_id": row.account_id,

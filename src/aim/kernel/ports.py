@@ -6,7 +6,7 @@ from typing import Literal, Protocol
 
 import polars as pl
 
-from aim.kernel.jobs import MetricJob, Window
+from aim.kernel.jobs import ForecastSelection, MetricJob, Window
 from aim.kernel.results import MetricRow
 
 EVAL_SCHEMA = {
@@ -40,15 +40,21 @@ class JobStore(Protocol):
 
 
 class ForecastReader(Protocol):
-    def load(self, *, cid: str, window: Window) -> pl.DataFrame:
+    def load(
+        self, *, cid: str, window: Window, selection: ForecastSelection
+    ) -> pl.DataFrame:
         """Forecast vs. actual of the tenant over the window, shaped as EVAL_SCHEMA. Per
-        (article, account, day) the forecast of the latest result written before that day."""
+        (article, account, day) exactly one forecast, chosen by `selection`."""
         ...
 
 
 class MetricWriter(Protocol):
     def write(
-        self, job: MetricJob, window: Window, rows: Sequence[MetricRow]
+        self,
+        job: MetricJob,
+        window: Window,
+        selection: ForecastSelection,
+        rows: Sequence[MetricRow],
     ) -> None:
         """Replaces any earlier rows of this data-job (a re-triggered job writes once)."""
         ...

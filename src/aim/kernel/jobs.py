@@ -5,9 +5,8 @@
                            +--metric computation failed-------------> error
                            +--bad jobConfiguration / owner vanished--> error_management
 
-A job evaluates ONE tenant (`cid`) over a window of complete days. For each
-(article, account, day) the forecast that counts is the one from the most recent
-`ai-results` row written BEFORE that day began (rule (a), see README).
+A job evaluates ONE tenant (`cid`) over a window of complete days. Which of the several
+forecasts for a day counts is the job's `ForecastSelection` (docs/decisions/0004).
 """
 
 from dataclasses import dataclass
@@ -21,6 +20,15 @@ JOB_TYPE = "metrics"
 """`data-jobs.type` this service claims; `abc_xyz` rows belong to someone else."""
 
 DEFAULT_WINDOW_DAYS = 30
+
+
+class ForecastSelection(StrEnum):
+    """Which forecast counts for a day when several runs forecast it (ADR 0004). A new
+    strategy = a member here + its query in `aim.boundaries.db.forecast_reader.SELECTIONS`
+    (a unit test holds the two together)."""
+
+    latest_before_day = "latest_before_day"
+    """The latest `ai-results` row written before the day began."""
 
 
 class JobState(StrEnum):
@@ -60,6 +68,7 @@ class MetricJobConfig(BaseModel):
         {}                                            last 30 days
         {"windowDays": 90}                            last 90 days
         {"start": "2026-09-01", "end": "2026-09-30"}  fixed window
+        {"forecastSelection": "latest_before_day"}    the default, spelled out
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -67,6 +76,9 @@ class MetricJobConfig(BaseModel):
     window_days: int = Field(default=DEFAULT_WINDOW_DAYS, alias="windowDays", ge=1, le=366)
     start: date | None = None
     end: date | None = None
+    forecast_selection: ForecastSelection = Field(
+        default=ForecastSelection.latest_before_day, alias="forecastSelection"
+    )
 
     @model_validator(mode="after")
     def _one_way_to_say_the_window(self) -> Self:
