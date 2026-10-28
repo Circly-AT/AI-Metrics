@@ -1,0 +1,28 @@
+# Runs `aim serve` persistently: restarted after a crash or a host reboot.
+#   docker compose -f docker/compose.yaml up -d --build
+#   docker compose -f docker/compose.yaml logs -f
+name: ai-metrics
+
+services:
+  aim:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ai-metrics:latest
+    restart: unless-stopped
+    # DB_* etc. from the repo's .env (read by compose, never copied into the image).
+    env_file: ../.env
+    environment:
+      # Certificate paths inside the container; override whatever .env says for the host.
+      DB_SSL_CA: /run/aim/ssl/ca-cert.pem
+      DB_SSL_CERT: /run/aim/ssl/client-cert.pem
+      DB_SSL_KEY: /run/aim/ssl/client-key.pem
+    volumes:
+      - ../ssl:/run/aim/ssl:ro
+    # Must cover the slowest job: on SIGTERM the poller finishes the running job first.
+    stop_grace_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"

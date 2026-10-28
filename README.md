@@ -18,6 +18,17 @@ uv run aim serve --env-file .env          # poll until SIGTERM/SIGINT
 uv run aim serve --env-file .env --once   # one poll, then exit
 ```
 
+### In a container (persistent)
+
+```bash
+docker compose -f docker/compose.yaml up -d --build   # build + start, restarts unless stopped
+docker compose -f docker/compose.yaml logs -f         # follow logs
+docker compose -f docker/compose.yaml down            # stop (SIGTERM; the running job finishes)
+```
+
+Settings come from `.env` (read by compose, never copied into the image); the certificates
+in `ssl/` are mounted read-only at `/run/aim/ssl`, and compose sets the `DB_SSL_*` paths to them.
+
 ## Checks
 
 ```bash
