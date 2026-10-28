@@ -8,6 +8,9 @@ UNKNOWN_DATABASE = 1049
 TABLE_ACCESS_DENIED = 1142  # e.g. "UPDATE command denied ... for table"
 COLUMN_ACCESS_DENIED = 1143
 NO_SUCH_TABLE = 1146
+UNKNOWN_COLUMN = 1054  # the table exists, but not as AIM's statements expect it
+DUPLICATE_KEY = 1062
+DEADLOCK = 1213  # InnoDB rolled the transaction back; running it again is the remedy
 
 PERMANENT = frozenset(
     {
@@ -17,6 +20,7 @@ PERMANENT = frozenset(
         TABLE_ACCESS_DENIED,
         COLUMN_ACCESS_DENIED,
         NO_SUCH_TABLE,
+        UNKNOWN_COLUMN,
     }
 )
 """Configuration errors: retrying does not fix them, a grant/DDL/settings change does."""

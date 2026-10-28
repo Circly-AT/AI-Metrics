@@ -1,35 +1,49 @@
-# Contract: `ai-metric-results`
+# Contract: `ai-metric-runs` and `ai-metric-results`
 
-**Status:** **proposal** — the table does not exist yet. DDL: `ddl/ai-metric-results.sql`.
-Needs the backend's agreement and grants (below) before AIM can run in an environment.
+**Status:** live on dev since 2026-10-28 (CIRBEFE-2077), in the backend's form. DDL:
+`ddl/ai-metric-runs.sql`; the design is
+[ADR 0009](../decisions/0009-metric-runs-with-results-and-soft-deleted-history.md). Other
+stages need the tables, the `metrics` rows and the grants (below).
 
 **Here:** `src/aim/boundaries/db/metric_writer.py`.
 
 ## Shape
 
-Long format, one row per (data-job, level, article, account, metric):
+**`ai-metric-runs`**: one row per (data-job, metric):
 
 | Column | Meaning |
 |---|---|
-| `dataJobId` | the `data-jobs` row that produced the row |
+| `dataJobId` | the `data-jobs` row that produced the run |
 | `cid` | tenant |
-| `windowStart`, `windowEnd` | evaluated days, both inclusive (the tenant's local days) |
+| `metricId` | `metrics.id` of `WAPE`, `MAE`, `RMSE` or `R_BIAS` (AIM's relative bias; [formulas](metric-formulas.md)) |
 | `forecastSelection` | strategy that chose the forecast per day, e.g. `latest_before_day` |
-| `level` | `article` = one (article, account) · `total` = pooled over every point of the job |
-| `articleId`, `accountId` | set on `article`, `NULL` on `total` |
-| `metric` | `wape`, `mae`, `rmse`, `bias` ([formulas](metric-formulas.md)) |
-| `value` | `NULL` = undefined for this slice (e.g. WAPE with zero actuals), not 0 |
-| `nPoints` | number of days behind the value |
+| `windowStart`, `windowEnd` | evaluated days, both inclusive (the tenant's local days) |
+| `value` | the metric **pooled** over every point of the run; `NULL` = undefined, not 0 |
+| `nPoints` | (article, account, day) points behind `value`, i.e. the sum of the results' `nPoints` |
+| `deleted_at` | set when a later run of the same identity replaced this one |
+
+**`ai-metric-results`**: one row per (run, article, account):
+
+| Column | Meaning |
+|---|---|
+| `runId` | the run |
+| `articleId`, `accountId` | the target; `accountId = 1` = all accounts (the pipeline's placeholder) |
+| `value` | the metric for this target; `NULL` = undefined (e.g. WAPE of an article that sold nothing) |
+| `nPoints` | days with a forecast for this target |
 
 ## Promises to readers
 
-- All rows of one data-job are written in **one transaction**: a reader sees all of them or
-  none.
-- Re-running a data-job **replaces** its rows; there are never rows from two runs of the
-  same `dataJobId`.
-- A new metric adds rows with a new `metric` value, never a new column.
-- To compare two jobs, compare rows with the same `forecastSelection`; numbers from
-  different strategies measure different things.
+- **Current numbers are the results of active runs:** `JOIN ai-metric-runs r ON r.id =
+  runId WHERE r.deleted_at IS NULL`. Result rows are never soft-deleted on their own.
+- There is **at most one active run** per (`cid`, metric, `forecastSelection`, window);
+  the database enforces it.
+- Re-running a data-job, or a new data-job with the same identity, **replaces** the
+  active run; the old run and its results stay as history.
+- All runs of one data-job are written in **one transaction**: a reader sees all of them
+  or none.
+- A new metric is a new `metrics` row and new runs, never a new column.
+- To compare runs, compare the same `forecastSelection` and look at `nPoints`; numbers
+  from different strategies rest on different points.
 
 ## Grants AIM needs
 
@@ -40,4 +54,7 @@ checks it at start and prints the missing `GRANT` statements ([ADR 0007](../deci
 |---|---|
 | `data-jobs` | SELECT, UPDATE (`state`, `containerID`, `error`) |
 | `prediction_values`, `ai-results`, `ai-jobs`, `sales` | SELECT |
-| `ai-metric-results` | SELECT, INSERT, DELETE |
+| `circly_customers.companies`, `circly_customers.timezones` | SELECT |
+| `metrics` | SELECT |
+| `ai-metric-runs` | SELECT, UPDATE (`deleted_at`), INSERT (the eight written columns) |
+| `ai-metric-results` | INSERT (the five written columns) |

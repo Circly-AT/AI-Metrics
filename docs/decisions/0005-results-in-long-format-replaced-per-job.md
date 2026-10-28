@@ -1,7 +1,7 @@
 # 0005 — Results in long format, replaced per data-job
 
-**Status:** accepted · 2026-10-15 (the table itself is still a
-[proposal](../contracts/ai-metric-results.md))
+**Status:** superseded by [ADR 0009](0009-metric-runs-with-results-and-soft-deleted-history.md) ·
+accepted 2026-10-15
 
 ## Context
 

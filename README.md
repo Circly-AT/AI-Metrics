@@ -3,7 +3,8 @@
 Computes forecast accuracy metrics per tenant. A management service polls
 `circly_data_handling.data-jobs` for `type = 'metrics'` rows, claims one, compares the
 tenant's point forecasts over a window of past days (default: the last 30) with actual
-sales and writes the metrics to `ai-metric-results`.
+sales and writes one run per metric to `ai-metric-runs` (the total) with its per-article
+values in `ai-metric-results`.
 
 **Documentation: [`docs/`](docs/README.md)** — contracts (what is agreed with the pipeline
 and the backend, and what is only assumed) and architectural decisions (ADRs).
@@ -36,12 +37,12 @@ src/aim/
                db/job_store.py   data-jobs (type=metrics): conditional-UPDATE claim, sweep
                db/forecast_reader.py   forecast-selection strategies + sales → forecast vs. actual
                db/local_calendar_day.py  UTC instant ↔ tenant's local day (polars, as the pipeline)
-               db/metric_writer.py     ai-metric-results
+               db/metric_writer.py     ai-metric-runs + ai-metric-results
   metrics/     point.py          wape, mae, rmse, bias
                evaluate.py       per (article, account) + pooled total
   kernel/      jobs.py (states, jobConfiguration, window, ForecastSelection),
                results.py, ports.py (Protocols)
-ddl/           proposed ai-metric-results table
+ddl/           proposed ai-metric-runs / ai-metric-results tables
 docs/          contracts/ and decisions/
 ```
 
@@ -50,7 +51,7 @@ docs/          contracts/ and decisions/
 | Job states, `jobConfiguration` keys and defaults | [contracts/data-jobs.md](docs/contracts/data-jobs.md) |
 | Which formulas match the pipeline, which do not | [contracts/metric-formulas.md](docs/contracts/metric-formulas.md) |
 | Which forecast counts for a day, how to add a strategy | [ADR 0004](docs/decisions/0004-forecast-selection-is-a-named-strategy.md) |
-| Result table shape | [contracts/ai-metric-results.md](docs/contracts/ai-metric-results.md) |
+| Result tables, history, what readers filter on | [contracts/ai-metric-results.md](docs/contracts/ai-metric-results.md) |
 
 ## Open questions
 
@@ -58,7 +59,8 @@ docs/          contracts/ and decisions/
    unit tests use fakes. Needs an integration test on a seeded MariaDB (ADR 0004).
 2. **`error` vs. `error_management`**: our reading, to confirm with the backend
    ([data-jobs](docs/contracts/data-jobs.md#states)).
-3. **Results table and grants**: a proposal ([ai-metric-results](docs/contracts/ai-metric-results.md)).
+3. **Result tables, `metrics` rows and grants**: a proposal (CIRBEFE-2077,
+   [contract](docs/contracts/ai-metric-results.md)); `ON DELETE CASCADE` is the backend's call.
 4. **Filters**: days are the tenant's local days as in the pipeline (ADR 0008), but no
    return/special-sale filters yet — numbers can
    drift from the pipeline's backtests ([reads](docs/contracts/forecast-and-sales-reads.md#known-differences-from-the-pipeline)).
