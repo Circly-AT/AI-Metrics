@@ -23,6 +23,7 @@ from aim.boundaries.db.driver_errors import (
     COLUMN_ACCESS_DENIED,
     NO_SUCH_TABLE,
     TABLE_ACCESS_DENIED,
+    UNKNOWN_COLUMN,
     errno_of,
 )
 from aim.boundaries.db.forecast_reader import CUSTOMERS_DB
@@ -69,18 +70,24 @@ REQUIRED: tuple[Probe, ...] = (
     Probe("sales", "SELECT"),
     Probe("companies", "SELECT", schema=CUSTOMERS_DB),
     Probe("timezones", "SELECT", schema=CUSTOMERS_DB),
-    # metric_writer.py -- the DELETE's WHERE reads dataJobId, hence SELECT as well. One
-    # INSERT probe per written column: a column-level grant on dataJobId alone would pass
-    # a single probe and fail the real INSERT with 1143, after a whole job was computed.
-    Probe("ai-metric-results", "SELECT"),
+    # metric_writer.py -- the deactivating UPDATE's WHERE reads the run's identity, hence
+    # SELECT on ai-metric-runs. One INSERT probe per written column: a column-level grant
+    # on some of them would pass a single probe and fail the real INSERT with 1143, after
+    # a whole job was computed.
+    Probe("metrics", "SELECT"),
+    Probe("ai-metric-runs", "SELECT"),
+    Probe("ai-metric-runs", "UPDATE", "deleted_at"),
     *(
-        Probe("ai-metric-results", "INSERT", column)
+        Probe("ai-metric-runs", "INSERT", column)
         for column in (
-            "dataJobId", "cid", "windowStart", "windowEnd", "forecastSelection",
-            "level", "articleId", "accountId", "metric", "value", "nPoints",
+            "dataJobId", "cid", "metricId", "forecastSelection", "windowStart", "windowEnd",
+            "value", "nPoints",
         )
     ),
-    Probe("ai-metric-results", "DELETE"),
+    *(
+        Probe("ai-metric-results", "INSERT", column)
+        for column in ("runId", "articleId", "accountId", "value", "nPoints")
+    ),
 )
 
 CURRENT_ACCOUNT = "SELECT CURRENT_USER()"
@@ -92,12 +99,13 @@ not the username from the settings plus the host we happen to connect from."""
 class GrantReport:
     missing_rights: tuple[Probe, ...]
     missing_tables: tuple[str, ...]
+    missing_columns: tuple[Probe, ...]
     account: str
     """Quoted for a GRANT, e.g. `'okremser'@'%'`."""
 
     @property
     def ok(self) -> bool:
-        return not self.missing_rights and not self.missing_tables
+        return not (self.missing_rights or self.missing_tables or self.missing_columns)
 
     def describe(self, *, schema: str) -> str:
         """Every gap at once (one restart per missing grant would be ping-pong), with the
@@ -106,6 +114,9 @@ class GrantReport:
         if self.missing_tables:
             tables = ", ".join(self.missing_tables)
             lines.append(f"  tables that do not exist: {tables} (see ddl/)")
+        if self.missing_columns:
+            columns = ", ".join(f"{p.ref}.`{p.column}`" for p in self.missing_columns)
+            lines.append(f"  columns AIM writes that do not exist: {columns} (see ddl/)")
         by_grant: dict[tuple[str, str], list[str]] = {}
         for p in self.missing_rights:
             ref = p.ref if p.schema else f"`{schema}`.{p.ref}"
@@ -117,11 +128,13 @@ class GrantReport:
 
 
 def check_grants(engine: Engine, probes: tuple[Probe, ...] = REQUIRED) -> GrantReport:
-    """Runs every probe. 1142/1143 = right missing, 1146 = table missing, anything else
-    (including success) = right present. A connect failure (wrong password, unknown
-    schema, DB down) raises -- that is not a grant question."""
+    """Runs every probe. 1142/1143 = right missing, 1146 = table missing, 1054 = column
+    missing (the table differs from ddl/), anything else (including success) = right
+    present. A connect failure (wrong password, unknown schema, DB down) raises -- that is
+    not a grant question."""
     missing_rights: list[Probe] = []
     missing_tables: list[str] = []
+    missing_columns: list[Probe] = []
     with engine.connect() as conn:
         user, _, host = conn.execute(text(CURRENT_ACCOUNT)).scalar_one().rpartition("@")
         for probe in probes:
@@ -134,10 +147,14 @@ def check_grants(engine: Engine, probes: tuple[Probe, ...] = REQUIRED) -> GrantR
                 elif code == NO_SUCH_TABLE:
                     if probe.ref not in missing_tables:
                         missing_tables.append(probe.ref)
+                elif code == UNKNOWN_COLUMN:
+                    missing_columns.append(probe)
                 elif code is None or code >= _CLIENT_ERRORS:
                     raise  # connection trouble says nothing about grants
                 # Any other server error: the privilege check passed, the statement
                 # failed later (e.g. 1364 on the INSERT form) -- the right is there.
             finally:
                 conn.rollback()
-    return GrantReport(tuple(missing_rights), tuple(missing_tables), f"'{user}'@'{host}'")
+    return GrantReport(
+        tuple(missing_rights), tuple(missing_tables), tuple(missing_columns), f"'{user}'@'{host}'"
+    )

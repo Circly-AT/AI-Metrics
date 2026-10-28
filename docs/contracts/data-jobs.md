@@ -38,8 +38,9 @@ trigger ──claim──▶ job_detected ──▶ finished
 - **Stale:** a `job_detected` row unchanged for `STALE_GRACE_SECONDS` (default 3600) is
   ended as `error_management` by any instance.
 - **No automatic retry**: the table has no attempts counter. Re-running a job = the backend
-  sets `state` back to `trigger`; AIM then replaces that job's earlier results
-  ([ADR 0005](../decisions/0005-results-in-long-format-replaced-per-job.md)).
+  sets `state` back to `trigger`; AIM then replaces that job's active runs and keeps the
+  old ones as history
+  ([ADR 0009](../decisions/0009-metric-runs-with-results-and-soft-deleted-history.md)).
 - `error` vs. `error_management`: AIM's reading is "the job failed" vs. "the management
   side could not run it". **Assumed** — confirm what the frontend shows for each.
 

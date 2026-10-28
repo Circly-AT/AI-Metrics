@@ -3,8 +3,8 @@
     aim serve [--env-file .env] [--once]   poll data-jobs (type=metrics) until SIGTERM/SIGINT
 
 Exit codes: 0 after a requested shutdown, 1 on any error -- including a failed grant
-preflight at start (every missing grant/table listed at once) and a permanent DB error
-(missing grant, wrong credentials) later on.
+preflight at start (every missing grant/table listed at once), a `metrics` row missing for
+a metric AIM writes, and a permanent DB error (missing grant, wrong credentials) later on.
 """
 
 import argparse
@@ -21,7 +21,11 @@ from aim.boundaries.db.engine import create_db_engine, is_instance_fault, is_per
 from aim.boundaries.db.forecast_reader import DbForecastReader
 from aim.boundaries.db.grants import check_grants
 from aim.boundaries.db.job_store import DbJobStore
-from aim.boundaries.db.metric_writer import DbMetricWriter
+from aim.boundaries.db.metric_writer import (
+    DbMetricWriter,
+    describe_metric_row_problems,
+    metric_row_problems,
+)
 from aim.boundaries.settings import Settings
 from aim.service.poller import Poller, PollerConfig
 
@@ -65,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
         report = check_grants(engine)
         if not report.ok:
             _LOGGER.error(report.describe(schema=settings.data_db))
+            return 1
+        if problems := metric_row_problems(engine):
+            _LOGGER.error(describe_metric_row_problems(problems))
             return 1
         poller = build_poller(settings, engine, stop)
         _LOGGER.info("aim serve started (grant preflight passed)")
