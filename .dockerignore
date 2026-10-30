@@ -1,0 +1,19 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.import_linter_cache
+**/__pycache__
+.claude
+
+# Secrets must never land in an image layer (see AI-Pipeline-V3/.dockerignore).
+.env*
+**/.env*
+ssl
+**/ssl
+*.pem
+**/*.pem
+*.key
+**/*.key
+*.crt
+**/*.crt
