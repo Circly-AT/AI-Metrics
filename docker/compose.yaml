@@ -10,19 +10,16 @@ services:
       dockerfile: docker/Dockerfile
     image: ai-metrics:latest
     restart: unless-stopped
-    # DB_* etc. from the repo's .env (read by compose, never copied into the image).
-    env_file: ../.env
+    # DB_* etc. from an env file (read by compose, never copied into the image). Default: the
+    # repo's .env; the deploy workflow points AIM_ENV_FILE at the host's copy instead.
+    env_file: ${AIM_ENV_FILE:-../.env}
     environment:
       # Certificate paths inside the container; override whatever .env says for the host.
       DB_SSL_CA: /run/aim/ssl/ca-cert.pem
       DB_SSL_CERT: /run/aim/ssl/client-cert.pem
       DB_SSL_KEY: /run/aim/ssl/client-key.pem
     volumes:
-      - ../ssl:/run/aim/ssl:ro
+      - ${AIM_SSL_DIR:-../ssl}:/run/aim/ssl:ro
     # Must cover the slowest job: on SIGTERM the poller finishes the running job first.
-    stop_grace_period: 120s
+    stop_grace_period: 120s.lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll
     logging:
-      driver: json-file
-      options:
-        max-size: 10m
-        max-file: "5"

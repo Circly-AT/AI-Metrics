@@ -1,0 +1,59 @@
+# Redeploys `aim serve` on circlydlbox whenever main changes.
+#
+# GitHub cannot reach circlydlbox, so the deploy job runs on a self-hosted runner installed
+# ON circlydlbox (label `aim-deploy`): the runner polls GitHub, receives the job and runs
+# docker compose locally. Config and certificates stay on the host (/srv/aim), never in
+# GitHub. Only `push` to main and manual runs trigger this -- never `pull_request`, so code
+# from a PR never reaches the runner before it is merged.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Two quick pushes: the second deploy waits for the first instead of racing it.
+concurrency:
+  group: deploy-circlydlbox
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - run: uv run pytest
+      - run: uv run ruff check
+      - run: uv run lint-imports
+
+  deploy:
+    needs: checks
+    runs-on: [self-hosted, linux, aim-deploy]
+    env:
+      AIM_ENV_FILE: /srv/aim/.env
+      AIM_SSL_DIR: /srv/aim/ssl
+    steps:
+      - uses: actions/checkout@v4
+
+      # Builds the image from this commit and replaces the running container (same compose
+      # project `ai-metrics`). The old one gets SIGTERM and finishes a running job first
+      # (stop_grace_period in compose.yaml).
+      - name: Build and restart
+        run: docker compose -f docker/compose.yaml up -d --build --remove-orphans
+
+      # `up -d` returns as soon as the container exists; this waits until `aim serve` has
+      # passed its startup checks, so a broken deploy shows up red here, not hours later.
+      - name: Wait for startup checks
+        run: |
+          for _ in $(seq 1 30); do
+            if docker compose -f docker/compose.yaml logs aim | grep -q "grant preflight passed"; then
+              echo "aim serve is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "aim serve did not start within 60s:"
+          docker compose -f docker/compose.yaml ps -a
+          docker compose -f docker/compose.yaml logs --tail 50 aim
+          exit 1
