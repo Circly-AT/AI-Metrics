@@ -186,6 +186,22 @@ def test_a_job_fault_ends_the_job_as_error_with_the_message():
     assert "NoForecastError" in store.rows[1].error
 
 
+def test_a_window_without_any_sale_ends_the_job_as_error_and_writes_nothing():
+    store, writer = FakeJobStore(JOB), FakeWriter()
+    no_sales = _frame(3).with_columns(pl.lit(0.0).alias("actual"))
+    assert _poller(store, FakeReader(no_sales), writer).tick() is True
+    assert store.rows[1].state is JobState.error
+    assert "NoSalesError" in store.rows[1].error
+    assert writer.written == {}
+
+
+def test_a_single_sale_in_the_window_is_enough_to_compute():
+    store = FakeJobStore(JOB)
+    one_sale = _frame(3).with_columns(pl.Series("actual", [0.0, 0.0, 5.0]))
+    assert _poller(store, FakeReader(one_sale)).tick() is True
+    assert store.rows[1].state is JobState.finished
+
+
 def test_an_instance_fault_leaves_the_claim_for_the_sweep():
     store = FakeJobStore(JOB)
     with pytest.raises(InstanceFault):

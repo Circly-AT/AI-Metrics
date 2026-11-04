@@ -28,7 +28,8 @@ Rows with `type = 'metrics'` and `deleted_at IS NULL`. AIM never reads or writes
 
 ```
 trigger ──claim──▶ job_detected ──▶ finished
-                        ├─────────▶ error             metric computation failed, or no usable tenant time zone
+                        ├─────────▶ error             metric computation failed, no usable tenant time zone,
+                        │                             no forecast or no sale in the window
                         ├─────────▶ error_management  jobConfiguration unusable
                         └──stale──▶ error_management  owner stopped responding
 ```
