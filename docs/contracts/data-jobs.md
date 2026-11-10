@@ -52,7 +52,7 @@ unknown key or a wrong type ends the job as `error_management` before any data i
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `windowDays` | int, 1–366 | `30` | evaluate the last N complete days, ending yesterday (the tenant's local days, [ADR 0008](../decisions/0008-days-are-the-tenants-local-calendar-days.md)) |
+| `windowDays` | int, 1–366 | `30` (`ai_job`: the ai-job's days) | evaluate the last N complete days, ending yesterday (the tenant's local days, [ADR 0008](../decisions/0008-days-are-the-tenants-local-calendar-days.md)) |
 | `start`, `end` | `"YYYY-MM-DD"`, both or neither | — | fixed window, both inclusive; `end` must be before the tenant's today; not together with `windowDays` |
 | `forecastSelection` | string | `"latest_before_day"` | which forecast counts per day ([ADR 0004](../decisions/0004-forecast-selection-is-a-named-strategy.md)), see below |
 | `aiJobId` | int ≥ 1 | — | the `ai-jobs.id` to evaluate; required with `forecastSelection = "ai_job"`, rejected with any other |
@@ -64,8 +64,12 @@ unknown key or a wrong type ends the job as `error_management` before any data i
 | `latest_before_day` | the latest `ai-results` row of the tenant written before the day began |
 | `ai_job` | the point value of ai-job `aiJobId` (latest result of that job on a tie), whenever it was written; an ai-job of another tenant or a soft-deleted one gives no forecasts, so the job ends as `error` |
 
-With `ai_job` the window still decides which days are evaluated: give `start`/`end` covering
-the days that ai-job forecast, otherwise the default "last 30 days" may hold none of them.
+**Window with `ai_job`:** without `windowDays` or `start`/`end`, the window is the ai-job's
+own: from the first to the last tenant-local day it holds a point forecast for, cut before
+the tenant's today. Re-triggered as days pass, it grows by one day each time — how the
+forecast degrades with distance from the run. Each growth is a new window, so a new run
+identity; the earlier, shorter runs stay active. No complete day yet (or no forecast at all)
+ends the job as `error`. `windowDays` or `start`/`end` override the ai-job's window.
 
 The backend writes no `jobConfiguration` today, so every job runs on the defaults, which
 match the previous behaviour (last 30 days).

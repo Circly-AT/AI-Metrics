@@ -53,6 +53,11 @@ class ForecastReader(Protocol):
         """The tenant's calendar day at the aware instant `now`."""
         ...
 
+    def ai_job_days(self, *, cid: str, ai_job_id: int) -> Window | None:
+        """The tenant-local days ai-job `ai_job_id` holds point forecasts for, first to
+        last; None when it holds none (or is not the tenant's, or is soft-deleted)."""
+        ...
+
     def load(
         self, *, cid: str, window: Window, selection: Selection
     ) -> pl.DataFrame:

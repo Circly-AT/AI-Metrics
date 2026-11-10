@@ -80,9 +80,14 @@ NOW = datetime(2026, 10, 15, 9, 0, tzinfo=UTC)
 
 class FakeReader:
     def __init__(
-        self, result: pl.DataFrame | BaseException, today: date | BaseException = date(2026, 10, 15)
+        self,
+        result: pl.DataFrame | BaseException,
+        today: date | BaseException = date(2026, 10, 15),
+        ai_job_days: Window | None = None,
     ) -> None:
         self.result = result
+        self.ai_job_days_result = ai_job_days
+        self.ai_job_days_calls: list[dict] = []
         self.today = today
         self.calls: list[dict] = []
         self.today_calls: list[dict] = []
@@ -92,6 +97,10 @@ class FakeReader:
         if isinstance(self.today, BaseException):
             raise self.today
         return self.today
+
+    def ai_job_days(self, **kwargs):
+        self.ai_job_days_calls.append(kwargs)
+        return self.ai_job_days_result
 
     def load(self, **kwargs):
         self.calls.append(kwargs)
@@ -134,14 +143,63 @@ def test_a_triggered_job_is_claimed_computed_and_finished():
     assert {r.metric for r in rows} == {"wape", "mae", "rmse", "bias"}
 
 
-def test_an_ai_job_selection_reaches_reader_and_writer_with_its_job():
-    job = MetricJob(id=1, cid="c1", configuration='{"forecastSelection": "ai_job", "aiJobId": 42}')
-    store, reader, writer = FakeJobStore(job), FakeReader(_frame(3)), FakeWriter()
+def _ai_job(extra: str = "") -> MetricJob:
+    config = '{"forecastSelection": "ai_job", "aiJobId": 42' + extra + "}"
+    return MetricJob(id=1, cid="c1", configuration=config)
+
+
+def test_an_ai_job_without_a_window_takes_the_days_the_job_forecast():
+    """Today is 15 Oct: the job forecast 1..28 Oct, so 1..14 Oct are evaluated."""
+    reader = FakeReader(_frame(3), ai_job_days=Window(date(2026, 10, 1), date(2026, 10, 28)))
+    store, writer = FakeJobStore(_ai_job()), FakeWriter()
     assert _poller(store, reader, writer).tick() is True
     assert store.rows[1].state is JobState.finished
+    assert reader.ai_job_days_calls == [{"cid": "c1", "ai_job_id": 42}]
     selection = Selection(ForecastSelection.ai_job, ai_job_id=42)
-    assert reader.calls[0]["selection"] == selection
+    assert reader.calls == [
+        {"cid": "c1", "window": Window(date(2026, 10, 1), date(2026, 10, 14)),
+         "selection": selection}
+    ]
     assert writer.written[1][1].label == "ai_job:42"
+
+
+def test_an_ai_job_that_ended_in_the_past_is_evaluated_whole():
+    days = Window(date(2026, 9, 1), date(2026, 9, 14))
+    store, reader = FakeJobStore(_ai_job()), FakeReader(_frame(3), ai_job_days=days)
+    assert _poller(store, reader).tick() is True
+    assert reader.calls[0]["window"] == days
+
+
+@pytest.mark.parametrize(
+    ("days", "message"),
+    [
+        (None, "ai-job 42 has no point forecast"),
+        (Window(date(2026, 10, 15), date(2026, 10, 28)), "no day of it is complete"),
+    ],
+)
+def test_an_ai_job_without_a_complete_forecast_day_is_a_job_error(days, message):
+    store, reader = FakeJobStore(_ai_job()), FakeReader(_frame(3), ai_job_days=days)
+    assert _poller(store, reader).tick() is True
+    assert store.rows[1].state is JobState.error
+    assert message in store.rows[1].error
+    assert reader.calls == []
+
+
+@pytest.mark.parametrize(
+    ("extra", "window"),
+    [
+        (', "windowDays": 7', Window(date(2026, 10, 8), date(2026, 10, 14))),
+        (
+            ', "start": "2026-09-01", "end": "2026-09-30"',
+            Window(date(2026, 9, 1), date(2026, 9, 30)),
+        ),
+    ],
+)
+def test_an_explicit_window_overrides_the_ai_jobs_own(extra, window):
+    store, reader = FakeJobStore(_ai_job(extra)), FakeReader(_frame(3))
+    assert _poller(store, reader).tick() is True
+    assert reader.ai_job_days_calls == []
+    assert reader.calls[0]["window"] == window
 
 
 def test_the_window_ends_the_day_before_the_tenants_today():

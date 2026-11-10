@@ -95,6 +95,12 @@ class Window:
     def days(self) -> int:
         return (self.end - self.start).days + 1
 
+    def complete_before(self, today: date) -> Window | None:
+        """The part of this window before `today` (whose sales are still arriving); None
+        when no day of it is complete yet."""
+        end = min(self.end, today - timedelta(days=1))
+        return Window(self.start, end) if end >= self.start else None
+
 
 class MetricJobConfig(BaseModel):
     """`jobConfiguration` of a metrics job. Every field is optional; an empty
@@ -105,6 +111,7 @@ class MetricJobConfig(BaseModel):
         {"start": "2026-09-01", "end": "2026-09-30"}  fixed window
         {"forecastSelection": "latest_before_day"}    the default, spelled out
         {"forecastSelection": "ai_job", "aiJobId": 4711}   the results of ai-job 4711
+                                                     over the days it forecast
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -131,6 +138,12 @@ class MetricJobConfig(BaseModel):
         ):
             raise ValueError("aiJobId goes with forecastSelection ai_job, and only with it")
         return self
+
+    @property
+    def has_explicit_window(self) -> bool:
+        """`windowDays` or `start`/`end` given. Without either, `ai_job` evaluates the
+        days its ai-job forecast; every other strategy the last `DEFAULT_WINDOW_DAYS`."""
+        return self.start is not None or "window_days" in self.model_fields_set
 
     @property
     def selection(self) -> Selection:

@@ -26,7 +26,7 @@ pipeline's backtest metrics.
 """
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import polars as pl
 from sqlalchemy import text
@@ -91,6 +91,16 @@ AI_JOB = """SELECT articleId, accountId, day, forecast FROM (
 ) ranked
  WHERE rn = 1"""
 
+# The instants of ai-job :ai_job_id's first and last point forecast -- the same rows
+# AI_JOB reads, without the window. Their local days are the job's default window.
+AI_JOB_SPAN = """SELECT MIN(pv.date), MAX(pv.date)
+  FROM prediction_values pv
+  JOIN `ai-results` r ON r.id = pv.aiResultId
+  JOIN `ai-jobs` j ON j.id = r.aiJobId
+ WHERE j.id = :ai_job_id AND j.cid = :cid AND j.deleted_at IS NULL
+   AND r.deleted_at IS NULL AND r.articleId IS NOT NULL
+   AND pv.deleted_at IS NULL AND pv.quantile IS NULL"""
+
 SELECTIONS: dict[ForecastSelection, str] = {
     ForecastSelection.latest_before_day: LATEST_BEFORE_DAY,
     ForecastSelection.ai_job: AI_JOB,
@@ -122,6 +132,19 @@ class DbForecastReader:
         with self._engine.connect() as conn:
             zone = tenant_timezone(conn, cid)
         return local_day_of(now, zone)
+
+    def ai_job_days(self, *, cid: str, ai_job_id: int) -> Window | None:
+        with self._engine.connect() as conn:
+            first, last = conn.execute(
+                text(AI_JOB_SPAN), {"cid": cid, "ai_job_id": ai_job_id}
+            ).one()
+            if first is None:
+                return None
+            zone = tenant_timezone(conn, cid)
+        return Window(
+            local_day_of(first.replace(tzinfo=UTC), zone),
+            local_day_of(last.replace(tzinfo=UTC), zone),
+        )
 
     def load(
         self, *, cid: str, window: Window, selection: Selection

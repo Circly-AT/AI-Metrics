@@ -86,6 +86,21 @@ def test_ai_job_names_the_job_it_evaluates():
     assert config.selection.params == {"ai_job_id": 42}
     assert config.selection.label == "ai_job:42"
     assert config.window(TODAY) == Window(date(2026, 10, 8), date(2026, 10, 14))
+    assert config.has_explicit_window
+
+
+def test_only_window_days_or_start_end_make_a_window_explicit():
+    assert not _parse(None).has_explicit_window
+    assert not _parse('{"forecastSelection": "ai_job", "aiJobId": 42}').has_explicit_window
+    assert _parse('{"windowDays": 30}').has_explicit_window  # the default, but said
+    assert _parse('{"start": "2026-09-01", "end": "2026-09-30"}').has_explicit_window
+
+
+def test_complete_before_cuts_a_window_at_today():
+    window = Window(date(2026, 10, 1), date(2026, 10, 28))
+    assert window.complete_before(TODAY) == Window(date(2026, 10, 1), date(2026, 10, 14))
+    assert window.complete_before(date(2026, 11, 1)) == window
+    assert window.complete_before(date(2026, 10, 1)) is None
 
 
 def test_latest_before_day_has_no_parameters_and_its_bare_name_as_label():

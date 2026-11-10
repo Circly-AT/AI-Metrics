@@ -38,6 +38,8 @@ ahead, the day before. One forecast per day has to be chosen. Options considered
    records as `forecastSelection` — `ai_job:<id>`, so two ai-jobs evaluated over the same
    window are separate run identities instead of replacing each other
    ([ADR 0009](0009-metric-runs-with-results-and-soft-deleted-history.md)).
+   Without `windowDays`/`start`/`end` its window is the ai-job's own — the local days it
+   forecast, cut before today — for tracking how a run's forecast degrades with distance.
 
 ## Adding a strategy
 
