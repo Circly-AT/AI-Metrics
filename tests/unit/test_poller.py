@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 import polars as pl
 import pytest
 
-from aim.kernel.jobs import ForecastSelection, JobState, MetricJob, Window
+from aim.kernel.jobs import ForecastSelection, JobState, MetricJob, Selection, Window
 from aim.kernel.ports import EVAL_SCHEMA, TenantTimezoneError
 from aim.service.poller import Backoff, Poller, PollerConfig
 
@@ -127,11 +127,21 @@ def test_a_triggered_job_is_claimed_computed_and_finished():
     store, reader, writer = FakeJobStore(JOB), FakeReader(_frame(3)), FakeWriter()
     assert _poller(store, reader, writer).tick() is True
     assert store.rows[1].state is JobState.finished
-    latest = ForecastSelection.latest_before_day
+    latest = Selection(ForecastSelection.latest_before_day)
     assert reader.calls == [{"cid": "c1", "window": LAST_30, "selection": latest}]
     window, selection, rows = writer.written[1]
     assert (window, selection) == (LAST_30, latest)
     assert {r.metric for r in rows} == {"wape", "mae", "rmse", "bias"}
+
+
+def test_an_ai_job_selection_reaches_reader_and_writer_with_its_job():
+    job = MetricJob(id=1, cid="c1", configuration='{"forecastSelection": "ai_job", "aiJobId": 42}')
+    store, reader, writer = FakeJobStore(job), FakeReader(_frame(3)), FakeWriter()
+    assert _poller(store, reader, writer).tick() is True
+    assert store.rows[1].state is JobState.finished
+    selection = Selection(ForecastSelection.ai_job, ai_job_id=42)
+    assert reader.calls[0]["selection"] == selection
+    assert writer.written[1][1].label == "ai_job:42"
 
 
 def test_the_window_ends_the_day_before_the_tenants_today():

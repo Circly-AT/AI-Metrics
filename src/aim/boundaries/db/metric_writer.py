@@ -1,6 +1,7 @@
 """`ai-metric-runs` + `ai-metric-results` writes (ADR 0009, DDL: ddl/ai-metric-runs.sql).
 
-One RUN per metric: the run carries the identity (cid, metric, forecast selection, window)
+One RUN per metric: the run carries the identity (cid, metric, forecast selection, window;
+the selection as `Selection.label`, so `ai_job:<id>` for one ai-job)
 and the pooled total; its `ai-metric-results` rows carry the per-(article, account)
 values. A re-run soft-deletes the active run of the same identity and inserts a new one;
 the old run and its results stay as history. Readers take results of ACTIVE runs only
@@ -22,7 +23,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DBAPIError
 
 from aim.boundaries.db.driver_errors import DEADLOCK, DUPLICATE_KEY, errno_of
-from aim.kernel.jobs import ForecastSelection, MetricJob, Window
+from aim.kernel.jobs import MetricJob, Selection, Window
 from aim.kernel.results import Level, MetricRow
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ class DbMetricWriter:
         self,
         job: MetricJob,
         window: Window,
-        selection: ForecastSelection,
+        selection: Selection,
         rows: Sequence[MetricRow],
     ) -> None:
         runs = _runs(rows)
@@ -94,7 +95,7 @@ def _write(
     conn: Connection,
     job: MetricJob,
     window: Window,
-    selection: ForecastSelection,
+    selection: Selection,
     runs: Sequence[_Run],
 ) -> None:
     metric_ids = _metric_ids(conn)
@@ -102,7 +103,7 @@ def _write(
         identity = {
             "cid": job.cid,
             "metric_id": metric_ids[run.metric],
-            "selection": selection,
+            "selection": selection.label,
             "window_start": window.start,
             "window_end": window.end,
         }

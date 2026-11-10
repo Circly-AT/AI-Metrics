@@ -29,7 +29,7 @@ def run_job(
     before anything is written when the window has no forecast or no sale."""
     config = parse_config(job)
     window = config.window(reader.local_today(cid=job.cid, now=now))
-    selection = config.forecast_selection
+    selection = config.selection
     frame = reader.load(cid=job.cid, window=window, selection=selection)
     if frame.is_empty():
         raise NoForecastError(
