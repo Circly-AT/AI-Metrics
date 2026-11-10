@@ -90,6 +90,15 @@ REQUIRED: tuple[Probe, ...] = (
     ),
 )
 
+READOUT_REQUIRED: tuple[Probe, ...] = (
+    # metric_readout.py -- the read-only monitoring server (`aim-mcp`). Deliberately its own
+    # list: the server should run as a SELECT-only account, not with `aim serve`'s rights.
+    Probe("data-jobs", "SELECT"),
+    Probe("ai-metric-runs", "SELECT"),
+    Probe("metrics", "SELECT"),
+    Probe("companies", "SELECT", schema=CUSTOMERS_DB),
+)
+
 CURRENT_ACCOUNT = "SELECT CURRENT_USER()"
 """The account the server matched (`user@host-pattern`), which is what a GRANT must name --
 not the username from the settings plus the host we happen to connect from."""
