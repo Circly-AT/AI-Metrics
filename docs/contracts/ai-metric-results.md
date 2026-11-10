@@ -16,7 +16,7 @@ stages need the tables, the `metrics` rows and the grants (below).
 | `dataJobId` | the `data-jobs` row that produced the run |
 | `cid` | tenant |
 | `metricId` | `metrics.id` of `WAPE`, `MAE`, `RMSE` or `R_BIAS` (AIM's relative bias; [formulas](metric-formulas.md)) |
-| `forecastSelection` | strategy that chose the forecast per day, e.g. `latest_before_day` |
+| `forecastSelection` | strategy that chose the forecast per day: `latest_before_day`, or `ai_job:<ai-jobs.id>` for one ai-job's forecasts |
 | `windowStart`, `windowEnd` | evaluated days, both inclusive (the tenant's local days) |
 | `value` | the metric **pooled** over every point of the run; `NULL` = undefined, not 0 |
 | `nPoints` | (article, account, day) points behind `value`, i.e. the sum of the results' `nPoints` |

@@ -16,13 +16,13 @@ from aim.boundaries.db.metric_writer import (
     describe_metric_row_problems,
     metric_row_problems,
 )
-from aim.kernel.jobs import ForecastSelection, MetricJob, Window
+from aim.kernel.jobs import ForecastSelection, MetricJob, Selection, Window
 from aim.kernel.results import Level, MetricRow
 from aim.metrics import METRICS
 
 JOB = MetricJob(id=42, cid="c1", configuration=None)
 WINDOW = Window(date(2026, 9, 15), date(2026, 10, 14))
-LATEST = ForecastSelection.latest_before_day
+LATEST = Selection(ForecastSelection.latest_before_day)
 SEEDED = [(name, f"id-{name}") for name in METRIC_NAMES.values()]
 
 
@@ -101,7 +101,7 @@ def test_each_metric_becomes_a_run_with_the_total_and_its_article_results():
     DbMetricWriter(engine).write(JOB, WINDOW, LATEST, _rows())
 
     assert engine.transactions == ["commit"]  # every metric of the job in ONE transaction
-    identity = {"cid": "c1", "selection": LATEST,
+    identity = {"cid": "c1", "selection": "latest_before_day",
                 "window_start": WINDOW.start, "window_end": WINDOW.end}
     assert engine.statements(DEACTIVATE_RUN) == [
         identity | {"metric_id": "id-WAPE"}, identity | {"metric_id": "id-MAE"},

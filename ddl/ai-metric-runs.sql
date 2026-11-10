@@ -26,7 +26,7 @@ CREATE TABLE `ai-metric-runs` (
   `dataJobId`         int(11)      NOT NULL COMMENT 'data-jobs row (type=metrics) that produced this run',
   `cid`               varchar(255) NOT NULL,
   `metricId`          varchar(36)  NOT NULL,
-  `forecastSelection` varchar(32)  NOT NULL COMMENT 'Strategy that chose the forecast per day, e.g. latest_before_day',
+  `forecastSelection` varchar(32)  NOT NULL COMMENT 'Strategy that chose the forecast per day: latest_before_day or ai_job:<ai-jobs.id>',
   `windowStart`       date         NOT NULL COMMENT 'First evaluated day (inclusive), tenant-local',
   `windowEnd`         date         NOT NULL COMMENT 'Last evaluated day (inclusive), tenant-local',
   `value`             double       NULL     COMMENT 'Pooled total; NULL = undefined (e.g. WAPE with zero actuals)',
