@@ -1,7 +1,7 @@
 import logging
-from datetime import datetime
+from datetime import date, datetime
 
-from aim.kernel.jobs import MetricJob, parse_config
+from aim.kernel.jobs import MetricJob, Window, parse_config
 from aim.kernel.ports import ForecastReader, MetricWriter
 from aim.metrics.evaluate import evaluate
 
@@ -26,10 +26,18 @@ def run_job(
     Raises `ConfigError` when jobConfiguration is unusable: before any DB read for its
     shape, after the tenant's "today" for a fixed window reaching into it. "Today" is the
     tenant's local day at `now` (ADR 0008). Raises `NoForecastError` / `NoSalesError`
-    before anything is written when the window has no forecast or no sale."""
+    before anything is written when the window has no forecast or no sale.
+
+    `ai_job` without `windowDays` / `start`/`end` takes the ai-job's own window: the days
+    it forecast, cut before today. Re-run as days pass, the window grows by one day each
+    time -- accuracy by distance from the run, i.e. how the forecast degrades."""
     config = parse_config(job)
-    window = config.window(reader.local_today(cid=job.cid, now=now))
-    selection = config.forecast_selection
+    selection = config.selection
+    today = reader.local_today(cid=job.cid, now=now)
+    if selection.ai_job_id is not None and not config.has_explicit_window:
+        window = _ai_job_window(job, selection.ai_job_id, reader=reader, today=today)
+    else:
+        window = config.window(today)
     frame = reader.load(cid=job.cid, window=window, selection=selection)
     if frame.is_empty():
         raise NoForecastError(
@@ -53,3 +61,21 @@ def run_job(
         len(rows),
     )
     return len(rows)
+
+
+def _ai_job_window(
+    job: MetricJob, ai_job_id: int, *, reader: ForecastReader, today: date
+) -> Window:
+    days = reader.ai_job_days(cid=job.cid, ai_job_id=ai_job_id)
+    if days is None:
+        raise NoForecastError(
+            f"cid {job.cid}: ai-job {ai_job_id} has no point forecast (or is not this "
+            f"tenant's, or is deleted)"
+        )
+    window = days.complete_before(today)
+    if window is None:
+        raise NoForecastError(
+            f"cid {job.cid}: ai-job {ai_job_id} forecasts {days.start}..{days.end}, "
+            f"no day of it is complete yet (today {today})"
+        )
+    return window

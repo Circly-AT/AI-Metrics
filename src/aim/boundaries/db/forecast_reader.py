@@ -1,7 +1,7 @@
 """Forecast vs. actual for one tenant over a window of complete days.
 
 Forecasts: one POINT value (`quantile IS NULL`) per (article, account, day), chosen by
-the job's `ForecastSelection` -- one query per strategy in `SELECTIONS` (ADR 0004). Tenant
+the job's `Selection` -- one query per strategy in `SELECTIONS` (ADR 0004). Tenant
 via `ai-jobs.cid`, since `ai-results` carries none. Backtests write no product rows, so
 only forecast runs show up here.
 
@@ -26,7 +26,7 @@ pipeline's backtest metrics.
 """
 
 from collections.abc import Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 import polars as pl
 from sqlalchemy import text
@@ -38,7 +38,7 @@ from aim.boundaries.db.local_calendar_day import (
     local_days,
     require_usable_timezone,
 )
-from aim.kernel.jobs import ForecastSelection, Window
+from aim.kernel.jobs import ForecastSelection, Selection, Window
 from aim.kernel.ports import EVAL_SCHEMA, TenantTimezoneError
 
 CUSTOMERS_DB = "circly_customers"
@@ -73,12 +73,42 @@ LATEST_BEFORE_DAY = """SELECT articleId, accountId, day, forecast FROM (
 ) ranked
  WHERE rn = 1"""
 
+# ai_job: the results of ai-job :ai_job_id, if it is the tenant's; no cut-off on
+# created_at. Several results of the job for one key: latest created_at, then higher id.
+AI_JOB = """SELECT articleId, accountId, day, forecast FROM (
+  SELECT r.articleId, r.accountId, d.day,
+         CAST(pv.value AS DOUBLE) AS forecast,
+         ROW_NUMBER() OVER (PARTITION BY r.articleId, r.accountId, d.day
+                            ORDER BY r.created_at DESC, r.id DESC) AS rn
+    FROM prediction_values pv
+    JOIN ({days}) d ON pv.date >= d.day_start AND pv.date < d.day_end
+    JOIN `ai-results` r ON r.id = pv.aiResultId
+    JOIN `ai-jobs` j ON j.id = r.aiJobId
+   WHERE j.id = :ai_job_id AND j.cid = :cid AND j.deleted_at IS NULL
+     AND r.deleted_at IS NULL AND r.articleId IS NOT NULL
+     AND pv.deleted_at IS NULL AND pv.quantile IS NULL
+     AND pv.date >= :start AND pv.date < :end_exclusive
+) ranked
+ WHERE rn = 1"""
+
+# The instants of ai-job :ai_job_id's first and last point forecast -- the same rows
+# AI_JOB reads, without the window. Their local days are the job's default window.
+AI_JOB_SPAN = """SELECT MIN(pv.date), MAX(pv.date)
+  FROM prediction_values pv
+  JOIN `ai-results` r ON r.id = pv.aiResultId
+  JOIN `ai-jobs` j ON j.id = r.aiJobId
+ WHERE j.id = :ai_job_id AND j.cid = :cid AND j.deleted_at IS NULL
+   AND r.deleted_at IS NULL AND r.articleId IS NOT NULL
+   AND pv.deleted_at IS NULL AND pv.quantile IS NULL"""
+
 SELECTIONS: dict[ForecastSelection, str] = {
     ForecastSelection.latest_before_day: LATEST_BEFORE_DAY,
+    ForecastSelection.ai_job: AI_JOB,
 }
 """Every strategy's query. Each returns (articleId, accountId, day, forecast) with at most
 one row per (articleId, accountId, day), and takes `{days}`, :cid, :start, :end_exclusive
-(`:start`/`:end_exclusive` are the UTC bounds of the whole window, for the index)."""
+(`:start`/`:end_exclusive` are the UTC bounds of the whole window, for the index) plus the
+strategy's own `Selection.params`."""
 
 ACTUALS = """SELECT s.articleId, s.accountId, d.day,
        CAST(SUM(s.quantity) AS DOUBLE) AS actual
@@ -103,16 +133,29 @@ class DbForecastReader:
             zone = tenant_timezone(conn, cid)
         return local_day_of(now, zone)
 
+    def ai_job_days(self, *, cid: str, ai_job_id: int) -> Window | None:
+        with self._engine.connect() as conn:
+            first, last = conn.execute(
+                text(AI_JOB_SPAN), {"cid": cid, "ai_job_id": ai_job_id}
+            ).one()
+            if first is None:
+                return None
+            zone = tenant_timezone(conn, cid)
+        return Window(
+            local_day_of(first.replace(tzinfo=UTC), zone),
+            local_day_of(last.replace(tzinfo=UTC), zone),
+        )
+
     def load(
-        self, *, cid: str, window: Window, selection: ForecastSelection
+        self, *, cid: str, window: Window, selection: Selection
     ) -> pl.DataFrame:
         with self._engine.connect() as conn:
             days = local_days(window, tenant_timezone(conn, cid))
             table, params = days_table(days)
             params |= {"cid": cid, "start": days[0].start, "end_exclusive": days[-1].end}
+            query = SELECTIONS[selection.strategy].format(days=table)
             forecasts = _frame(
-                conn.execute(text(SELECTIONS[selection].format(days=table)), params).all(),
-                "forecast",
+                conn.execute(text(query), params | selection.params).all(), "forecast"
             )
             if forecasts.is_empty():
                 return pl.DataFrame(schema=EVAL_SCHEMA)

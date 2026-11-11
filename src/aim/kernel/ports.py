@@ -1,13 +1,14 @@
-"""The three seams the service needs. DB implementations live in `aim.boundaries.db`,
+"""The seams the service needs. DB implementations live in `aim.boundaries.db`,
 in-memory fakes in the tests."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Literal, Protocol
 
 import polars as pl
 
-from aim.kernel.jobs import ForecastSelection, MetricJob, Window
+from aim.kernel.jobs import MetricJob, Selection, Window
+from aim.kernel.readout import CustomerActivity, JobRef, RunRow
 from aim.kernel.results import MetricRow
 
 EVAL_SCHEMA = {
@@ -53,8 +54,13 @@ class ForecastReader(Protocol):
         """The tenant's calendar day at the aware instant `now`."""
         ...
 
+    def ai_job_days(self, *, cid: str, ai_job_id: int) -> Window | None:
+        """The tenant-local days ai-job `ai_job_id` holds point forecasts for, first to
+        last; None when it holds none (or is not the tenant's, or is soft-deleted)."""
+        ...
+
     def load(
-        self, *, cid: str, window: Window, selection: ForecastSelection
+        self, *, cid: str, window: Window, selection: Selection
     ) -> pl.DataFrame:
         """Forecast vs. actual of the tenant over the window, shaped as EVAL_SCHEMA. Per
         (article, account, day) exactly one forecast, chosen by `selection`."""
@@ -66,8 +72,43 @@ class MetricWriter(Protocol):
         self,
         job: MetricJob,
         window: Window,
-        selection: ForecastSelection,
+        selection: Selection,
         rows: Sequence[MetricRow],
     ) -> None:
         """Replaces any earlier rows of this data-job (a re-triggered job writes once)."""
+        ...
+
+
+class MetricReadout(Protocol):
+    """Read-only view for monitoring (`aim-mcp`). Never writes; datetimes are aware UTC."""
+
+    def job_counts(self, *, since: datetime) -> Mapping[str, int]:
+        """`data-jobs` (type=metrics) per state, among rows updated at or after `since`."""
+        ...
+
+    def backlog(self) -> tuple[int, datetime | None]:
+        """Rows waiting in `trigger`, and the oldest one's `created_at`."""
+        ...
+
+    def claimed(self) -> Sequence[JobRef]:
+        """Rows in `job_detected` (being computed, or abandoned), oldest first."""
+        ...
+
+    def last_finished_at(self) -> datetime | None: ...
+
+    def recent_failures(self, *, since: datetime, limit: int) -> Sequence[JobRef]:
+        """`error` / `error_management` rows updated at or after `since`, newest first."""
+        ...
+
+    def customer_activity(self) -> Sequence[CustomerActivity]: ...
+
+    def latest_runs(
+        self, *, selection: str, since: datetime, cid: str | None
+    ) -> Sequence[RunRow]:
+        """Per (tenant, metric) the latest ACTIVE run of `selection` created at or after
+        `since`: the latest window end wins, then the latest run."""
+        ...
+
+    def company_names(self, cids: Sequence[str]) -> Mapping[str, str]:
+        """`companies.companyName` per cid; tenants without a live row or name are absent."""
         ...

@@ -30,14 +30,26 @@ ahead, the day before. One forecast per day has to be chosen. Options considered
    - Every result row records its `forecastSelection`, so numbers from different
      strategies are never mixed up.
 
+3. **Added 2026-11-10: `ai_job`** — the forecasts of one `ai-jobs` row named by
+   `jobConfiguration.aiJobId`, without a `created_at` cut-off (several results of that job
+   for a key: latest `created_at`, then higher id). The job must belong to the data-job's
+   `cid`. Strategy and parameters travel together as `Selection` (`src/aim/kernel/jobs.py`):
+   `Selection.params` are bound into the query, and `Selection.label` is what the run
+   records as `forecastSelection` — `ai_job:<id>`, so two ai-jobs evaluated over the same
+   window are separate run identities instead of replacing each other
+   ([ADR 0009](0009-metric-runs-with-results-and-soft-deleted-history.md)).
+   Without `windowDays`/`start`/`end` its window is the ai-job's own — the local days it
+   forecast, cut before today — for tracking how a run's forecast degrades with distance.
+
 ## Adding a strategy
 
 1. Member in `ForecastSelection`, with a docstring that states the rule exactly.
 2. Query in `SELECTIONS` with the same parameters and the same output shape.
 3. Row in the `forecastSelection` table of the [data-jobs contract](../contracts/data-jobs.md#jobconfiguration).
 4. If the strategy needs its own parameter (e.g. `leadDays` for (b)), it becomes an optional
-   field of `MetricJobConfig`, validated to appear only with its strategy, and bound as a
-   query parameter.
+   field of `MetricJobConfig`, validated to appear only with its strategy, carried by
+   `Selection` (its `params` and, if it is part of the run's identity, its `label`) and
+   bound as a query parameter — as `aiJobId` for `ai_job`.
 5. (c) is not a selection but a different result shape (several rows per day) — that needs
    a lead column in `ai-metric-results` and a new ADR.
 

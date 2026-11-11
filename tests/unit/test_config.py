@@ -3,7 +3,14 @@ from datetime import date
 import pytest
 
 from aim.boundaries.db.forecast_reader import SELECTIONS
-from aim.kernel.jobs import ConfigError, ForecastSelection, MetricJob, Window, parse_config
+from aim.kernel.jobs import (
+    ConfigError,
+    ForecastSelection,
+    MetricJob,
+    Selection,
+    Window,
+    parse_config,
+)
 
 TODAY = date(2026, 10, 15)
 
@@ -48,6 +55,11 @@ def test_an_explicit_window_may_not_reach_into_today():
         '{"start": "2026-09-30", "end": "2026-09-01"}',
         '{"windowDays": 30, "start": "2026-09-01", "end": "2026-09-30"}',
         '{"forecastSelection": "latest"}',
+        '{"forecastSelection": "ai_job"}',
+        '{"forecastSelection": "ai_job", "aiJobId": "42"}',
+        '{"forecastSelection": "ai_job", "aiJobId": 0}',
+        '{"aiJobId": 42}',
+        '{"forecastSelection": "latest_before_day", "aiJobId": 42}',
     ],
 )
 def test_an_unusable_config_is_a_config_error(configuration):
@@ -66,3 +78,50 @@ def test_every_forecast_selection_has_exactly_one_query():
     """A strategy accepted in jobConfiguration but missing in the reader would pass the
     config check and then crash with KeyError mid-job."""
     assert set(SELECTIONS) == set(ForecastSelection)
+
+
+def test_ai_job_names_the_job_it_evaluates():
+    config = _parse('{"forecastSelection": "ai_job", "aiJobId": 42, "windowDays": 7}')
+    assert config.selection == Selection(ForecastSelection.ai_job, ai_job_id=42)
+    assert config.selection.params == {"ai_job_id": 42}
+    assert config.selection.label == "ai_job:42"
+    assert config.window(TODAY) == Window(date(2026, 10, 8), date(2026, 10, 14))
+    assert config.has_explicit_window
+
+
+def test_only_window_days_or_start_end_make_a_window_explicit():
+    assert not _parse(None).has_explicit_window
+    assert not _parse('{"forecastSelection": "ai_job", "aiJobId": 42}').has_explicit_window
+    assert _parse('{"windowDays": 30}').has_explicit_window  # the default, but said
+    assert _parse('{"start": "2026-09-01", "end": "2026-09-30"}').has_explicit_window
+
+
+def test_complete_before_cuts_a_window_at_today():
+    window = Window(date(2026, 10, 1), date(2026, 10, 28))
+    assert window.complete_before(TODAY) == Window(date(2026, 10, 1), date(2026, 10, 14))
+    assert window.complete_before(date(2026, 11, 1)) == window
+    assert window.complete_before(date(2026, 10, 1)) is None
+
+
+def test_latest_before_day_has_no_parameters_and_its_bare_name_as_label():
+    selection = _parse(None).selection
+    assert selection.params == {}
+    assert selection.label == "latest_before_day"
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [Selection(ForecastSelection.latest_before_day), Selection(ForecastSelection.ai_job, 1)],
+)
+def test_every_query_binds_its_strategys_parameters(selection):
+    """A parameter in `Selection.params` the query never uses (or the other way round)
+    means the strategy silently ignores its configuration."""
+    sql = SELECTIONS[selection.strategy]
+    for name in selection.params:
+        assert f":{name}" in sql
+    assert (":ai_job_id" in sql) == ("ai_job_id" in selection.params)
+
+
+def test_the_run_label_fits_the_forecast_selection_column():
+    """`ai-metric-runs.forecastSelection` is varchar(32)."""
+    assert len(Selection(ForecastSelection.ai_job, 2**31 - 1).label) <= 32

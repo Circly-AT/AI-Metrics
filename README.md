@@ -16,7 +16,13 @@ uv sync
 cp .env.example .env   # fill in DB_*, incl. DB_TLS + certificate paths (ADR 0006)
 uv run aim serve --env-file .env          # poll until SIGTERM/SIGINT
 uv run aim serve --env-file .env --once   # one poll, then exit
+uv run aim-mcp --env-file .env            # read-only MCP server (stdio) for monitoring
 ```
+
+`aim-mcp` serves two read-only tools, `metric_status` (is AIM working: queue, failures, when
+each tenant last got numbers) and `metric_summary` (latest pooled metrics per tenant). Every
+query is a SELECT; at start it checks `READOUT_REQUIRED` in `grants.py`, so run it as a
+SELECT-only DB account. `--http` serves streamable HTTP instead of stdio.
 
 ### In a container (persistent)
 
@@ -42,17 +48,20 @@ uv run ruff check
 ```
 src/aim/
   apps/        cli.py            entry point `aim serve`, wires everything together
+               mcp_server.py     entry point `aim-mcp`: read-only monitoring tools
   service/     poller.py         the loop: sweep stale → list trigger → claim → run → finish/fail
                runner.py         one job: parse config → window → load → evaluate → write
+               readout.py        monitoring answers (metric_status, metric_summary)
   boundaries/  settings.py       env reader (same DB_* names as the pipeline)
                db/job_store.py   data-jobs (type=metrics): conditional-UPDATE claim, sweep
                db/forecast_reader.py   forecast-selection strategies + sales → forecast vs. actual
                db/local_calendar_day.py  UTC instant ↔ tenant's local day (polars, as the pipeline)
                db/metric_writer.py     ai-metric-runs + ai-metric-results
+               db/metric_readout.py    read-only queries behind the MCP tools
   metrics/     point.py          wape, mae, rmse, bias
                evaluate.py       per (article, account) + pooled total
   kernel/      jobs.py (states, jobConfiguration, window, ForecastSelection),
-               results.py, ports.py (Protocols)
+               results.py, readout.py, ports.py (Protocols)
 ddl/           proposed ai-metric-runs / ai-metric-results tables
 docs/          contracts/ and decisions/
 ```
