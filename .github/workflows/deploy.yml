@@ -1,25 +1,34 @@
-# Redeploys `aim serve` on circlydlbox whenever main changes.
+# Redeploys `aim serve` whenever main, staging or develop changes -- each branch on its own
+# self-hosted runner, picked by label:
+#   main -> main_system    staging -> staging_system    develop -> dev_system
 #
-# GitHub cannot reach circlydlbox, so the deploy job runs on a self-hosted runner installed
-# ON circlydlbox (label `aim-deploy`): the runner polls GitHub, receives the job and runs
-# docker compose locally. Config and certificates stay on the host (/srv/aim), never in
-# GitHub. Only `push` to main and manual runs trigger this -- never `pull_request`, so code
-# from a PR never reaches the runner before it is merged.
+# GitHub cannot reach the hosts, so the jobs run on a runner installed ON the target host:
+# the runner polls GitHub, receives the job and runs docker compose locally. Config and
+# certificates stay on the host (/srv/aim), never in GitHub. Only `push` to these branches
+# and manual runs trigger this -- never `pull_request`, so code from a PR never reaches a
+# runner before it is merged. A manual run from any other branch is skipped.
 name: Deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging, develop]
   workflow_dispatch:
 
-# Two quick pushes: the second deploy waits for the first instead of racing it.
+# Two quick pushes to one branch: the second deploy waits for the first instead of racing it.
 concurrency:
-  group: deploy-circlydlbox
+  group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    if: contains(fromJSON('["main", "staging", "develop"]'), github.ref_name)
+    # Branch -> runner label (develop is the fallthrough; the `if` above excludes all other
+    # branches). Keep in sync with the same line in the other job.
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - "${{ github.ref_name == 'main' && 'main_system' || github.ref_name == 'staging' && 'staging_system' || 'dev_system' }}"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -30,7 +39,14 @@ jobs:
 
   deploy:
     needs: checks
-    runs-on: [self-hosted, linux, aim-deploy]
+    if: contains(fromJSON('["main", "staging", "develop"]'), github.ref_name)
+    # Branch -> runner label (develop is the fallthrough; the `if` above excludes all other
+    # branches). Keep in sync with the same line in the other job.
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - "${{ github.ref_name == 'main' && 'main_system' || github.ref_name == 'staging' && 'staging_system' || 'dev_system' }}"
     env:
       AIM_ENV_FILE: /srv/aim/.env
       AIM_SSL_DIR: /srv/aim/ssl

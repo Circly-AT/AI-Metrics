@@ -21,5 +21,9 @@ services:
     volumes:
       - ${AIM_SSL_DIR:-../ssl}:/run/aim/ssl:ro
     # Must cover the slowest job: on SIGTERM the poller finishes the running job first.
-    stop_grace_period: 120s.lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll
+    stop_grace_period: 120s
     logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
